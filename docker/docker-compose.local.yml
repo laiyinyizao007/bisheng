@@ -1,0 +1,75 @@
+# 本地覆盖：
+#   1) cr.dataelem.com 需要认证、镜像加速源屏蔽 minio/minio，替换为可公开拉取的镜像
+#   2) redis 宿主机端口避让
+#   3) 所有服务加 Docker 日志轮转（官方默认 json-file 无大小限制，后端控制台为 DEBUG 级别，长期运行会持续增长）
+# 用法：docker compose -f docker-compose.yml -f docker-compose.local.yml -p bisheng up -d
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
+services:
+  mysql:
+    logging: *default-logging
+
+  openfga-migrate:
+    # 官方镜像（-dm 版仅额外支持达梦，本地使用 MySQL 不需要）
+    image: openfga/openfga:v1.15.1
+    logging: *default-logging
+
+  openfga:
+    image: openfga/openfga:v1.15.1
+    logging: *default-logging
+
+  redis:
+    # 宿主机 6379 已被其他项目的 gemp-redis-dev 占用，仅改对外映射；容器间仍用 redis:6379
+    ports: !override
+      - "16379:6379"
+    logging: *default-logging
+
+  backend:
+    logging: *default-logging
+
+  backend_worker:
+    logging: *default-logging
+
+  frontend:
+    logging: *default-logging
+
+  elasticsearch:
+    logging: *default-logging
+
+  etcd:
+    logging: *default-logging
+
+  minio:
+    image: bitnamilegacy/minio:2023.3.24
+    user: root
+    entrypoint: ["/opt/bitnami/minio/bin/minio"]
+    command: server /minio_data --console-address ":9001"
+    logging: *default-logging
+
+  milvus:
+    logging: *default-logging
+
+  # PaddleOCR 云服务只提供异步任务接口，而毕昇的 paddle_ocr 解析器发同步请求；
+  # 这个小服务把同步请求转成云端异步任务（见 paddleocr-shim/shim.py）。
+  # 只在容器网络内可访问（未发布端口）；令牌来自本目录 .env 的 PADDLEOCR_TOKEN。
+  paddleocr-shim:
+    container_name: bisheng-paddleocr-shim
+    image: python:3.11-slim
+    command: python -u /app/shim.py
+    environment:
+      TZ: Asia/Shanghai
+      PORT: "8000"
+      PADDLEOCR_TOKEN: ${PADDLEOCR_TOKEN:-}
+    volumes:
+      - ./paddleocr-shim/shim.py:/app/shim.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: on-failure
+    logging: *default-logging

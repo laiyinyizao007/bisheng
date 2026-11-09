@@ -1,0 +1,15 @@
+# 我们自己加在 bisheng/docker/ 里的文件（官方仓库没有的）。备份脚本按这个清单打包。
+# 一行一个路径，相对 docker/ 目录，可以是文件或目录。新增自有文件时请在这里加一行。
+#
+# 没有改动过任何官方文件（docker-compose.yml、config.yaml、nginx 等均为官方原样）。
+# 说明：nginx/conf.d/default.conf 的修改时间会随前端容器启动而变化，是 nginx 镜像入口脚本
+# 对挂载文件执行 sed -i 造成的，不是我们改的。
+#
+# 不在这里的：.env（密钥，单独处理，见 backup.sh 的 WITH_ENV）、data/ 与 mysql/data（数据，由脚本另行备份）。
+
+docker-compose.local.yml
+backup.sh
+own-files.list
+DEPLOY-LOCAL.md
+artifact-system-prompt.txt
+paddleocr-shim
