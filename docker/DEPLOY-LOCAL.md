@@ -374,3 +374,10 @@ Tavily ✅（3.0 秒）；SerpAPI ✅（**19.3 秒，较慢**）；Firecrawl ✅
 ## 18. 延伸阅读
 
 - [`docs/linsight-evolution.md`](../../docs/linsight-evolution.md)：灵思（任务模式）的规划机制、已知局限、业内做法，以及单独演进灵思或引入外部规划者的路径。
+
+## 5. 接入 invest 研究沙盒(2026-11-12)
+
+`backend` 与 `backend_worker` 额外加入外部网络 `research_net`(invest 的 `docker-compose.research.yml` 创建,`internal: true`,无外网出口)。
+**启动顺序**:先在 invest 仓库 `docker compose -f docker-compose.research.yml up -d`,再启动毕昇;否则毕昇会因找不到外部网络而无法启动。
+毕昇里的工具地址是 `http://research-gateway:8765`,鉴权头 `Authorization: Bearer <令牌>`,接口描述见 invest 仓库 `docs/research-gateway.openapi.json`。
+令牌在 invest 仓库 `data/research-control/gateway.token`(不要贴进聊天或文档)。其余毕昇服务(MySQL/Redis/ES/Milvus 等)不接入该网络。

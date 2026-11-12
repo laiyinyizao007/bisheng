@@ -36,11 +36,17 @@ services:
     logging: *default-logging
 
   backend:
+    networks:
+      - default
+      - research_net
     ports: !override
       - "127.0.0.1:7860:7860"
     logging: *default-logging
 
   backend_worker:
+    networks:
+      - default
+      - research_net
     logging: *default-logging
 
   frontend:
@@ -93,3 +99,11 @@ services:
       retries: 3
     restart: on-failure
     logging: *default-logging
+
+# invest 研究沙盒网关所在的内部网络(internal,无外网出口)。须先由 invest 仓库的
+# docker-compose.research.yml 创建:  docker compose -f docker-compose.research.yml up -d
+# 毕昇通过 http://research-gateway:8765 调用研究沙盒;其余服务不接入该网络。
+networks:
+  research_net:
+    external: true
+    name: research_net
