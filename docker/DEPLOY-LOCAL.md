@@ -381,3 +381,13 @@ Tavily ✅（3.0 秒）；SerpAPI ✅（**19.3 秒，较慢**）；Firecrawl ✅
 **启动顺序**:先在 invest 仓库 `docker compose -f docker-compose.research.yml up -d`,再启动毕昇;否则毕昇会因找不到外部网络而无法启动。
 毕昇里的工具地址是 `http://research-gateway:8765`,鉴权头 `Authorization: Bearer <令牌>`,接口描述见 invest 仓库 `docs/research-gateway.openapi.json`。
 令牌在 invest 仓库 `data/research-control/gateway.token`(不要贴进聊天或文档)。其余毕昇服务(MySQL/Redis/ES/Milvus 等)不接入该网络。
+
+## 19. 备用模型 Ark(火山方舟 Agent Plan,2026-11-12)
+
+- 服务提供方 `Ark`(id 3,类型 `volcengine`),API Host:`https://ark.cn-beijing.volces.com/api/plan/v3`(OpenAI 兼容)。Key 在 `.env` 的 `ARK_API_KEY`,与 dsh desktop 共用同一个 Agent Plan key,不写入文档。
+- 不要用标准的 `/api/v3`:这个 key 对它返回 401。dsh desktop 里配的 `/api/plan` 是 Anthropic 协议,毕昇用不了。
+- 模型(均已 `/llm/verify` status=0):`deepseek-v4-pro`(id 11)、`deepseek-v4-flash`(id 12)、`doubao-seed-2.1-pro`(id 13)。dsh 里还配了 glm-5.3、kimi-k3 等,需要时再加。
+- 推理内容走独立的 `reasoning_content` 字段,不会出现第 16 节的 `<think>` 标签问题。
+- **只是备用,不是自动故障切换**:毕昇没有主模型失败自动切备用的机制。MiniMax 被审核拦截或不可用时,在"系统模型设置"和助手/工作流里手动改选 Ark 模型。系统默认模型仍是 MiniMax。
+- 该 key 属于套餐额度,与 dsh desktop 共用,用量会互相占用。
+- 登录脚本注意:登录账号是邮箱(见第 6 节)。用 `.env` 里 `BISHENG_ADMIN_EMAIL` 的邮箱和 `BISHENG_ADMIN_PASSWORD`;密码需先用 `/user/public_key` 返回的 RSA 公钥加密(PKCS1 v1.5)再 base64。
