@@ -1,7 +1,8 @@
 # 本地覆盖：
 #   1) cr.dataelem.com 需要认证、镜像加速源屏蔽 minio/minio，替换为可公开拉取的镜像
 #   2) redis 宿主机端口避让
-#   3) 所有服务加 Docker 日志轮转（官方默认 json-file 无大小限制，后端控制台为 DEBUG 级别，长期运行会持续增长）
+#   3) 所有对外端口只绑 127.0.0.1(invest ADR 20261110-bisheng-ai-researcher 安全约束 2:仅内网监听)
+#   4) 所有服务加 Docker 日志轮转（官方默认 json-file 无大小限制，后端控制台为 DEBUG 级别，长期运行会持续增长）
 # 用法：docker compose -f docker-compose.yml -f docker-compose.local.yml -p bisheng up -d
 x-logging: &default-logging
   driver: json-file
@@ -11,6 +12,8 @@ x-logging: &default-logging
 
 services:
   mysql:
+    ports: !override
+      - "127.0.0.1:3306:3306"
     logging: *default-logging
 
   openfga-migrate:
@@ -19,31 +22,45 @@ services:
     logging: *default-logging
 
   openfga:
+    ports: !override
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:2112:2112"
     image: openfga/openfga:v1.15.1
     logging: *default-logging
 
   redis:
     # 宿主机 6379 已被其他项目的 gemp-redis-dev 占用，仅改对外映射；容器间仍用 redis:6379
     ports: !override
-      - "16379:6379"
+      - "127.0.0.1:16379:6379"
     logging: *default-logging
 
   backend:
+    ports: !override
+      - "127.0.0.1:7860:7860"
     logging: *default-logging
 
   backend_worker:
     logging: *default-logging
 
   frontend:
+    ports: !override
+      - "127.0.0.1:3001:3001"
     logging: *default-logging
 
   elasticsearch:
+    ports: !override
+      - "127.0.0.1:9200:9200"
+      - "127.0.0.1:9300:9300"
     logging: *default-logging
 
   etcd:
     logging: *default-logging
 
   minio:
+    ports: !override
+      - "127.0.0.1:9100:9000"
+      - "127.0.0.1:9101:9001"
     image: bitnamilegacy/minio:2023.3.24
     user: root
     entrypoint: ["/opt/bitnami/minio/bin/minio"]
@@ -51,6 +68,9 @@ services:
     logging: *default-logging
 
   milvus:
+    ports: !override
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:9091:9091"
     logging: *default-logging
 
   # PaddleOCR 云服务只提供异步任务接口，而毕昇的 paddle_ocr 解析器发同步请求；

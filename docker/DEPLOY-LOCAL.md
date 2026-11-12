@@ -23,6 +23,9 @@ compose 的 service 名是 `backend` / `backend_worker`，`bisheng-backend` 是 
 | openfga / openfga-migrate | `cr.dataelem.com/dataelement/openfga:v1.15.2-dm` | `openfga/openfga:v1.15.1` | `cr.dataelem.com` 需要登录，匿名拉取返回 401；`-dm` 版仅多了达梦 DB 支持，本地用 MySQL 不需要 |
 | minio（Milvus 底层存储） | `cr.dataelem.com/minio/minio:RELEASE.2023-03-20T20-16-18Z` | `bitnamilegacy/minio:2023.3.24`（`user: root`，entrypoint 指向 `/opt/bitnami/minio/bin/minio`） | 同上；官方 `minio/minio` 被国内镜像源 403，quay.io 需登录 |
 | redis 宿主机端口 | `6379` | `16379`（容器内仍是 `redis:6379`） | 宿主机 6379 被另一项目的 `gemp-redis-dev` 占用 |
+| 所有对外端口 | `0.0.0.0` | 只绑 `127.0.0.1`（`ports: !override`） | invest 的 ADR `20261110-bisheng-ai-researcher` 安全约束 2：仅内网监听，不暴露 |
+
+Code 节点：本版本 `workflow.code_node_enabled` 默认关闭且本地配置未开启（该节点无沙箱，开启即可在服务器执行任意命令），保持关闭。
 
 未做的验证：没有申请 `cr.dataelem.com` 账号，因此未用原版镜像对比过；v1.15.1 与 v1.15.2 的差异未逐项核对。
 后端日志里 OpenFGA 读取请求均为 200，权限库工作正常。
