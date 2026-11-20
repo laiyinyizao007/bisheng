@@ -3,6 +3,7 @@ from bisheng.open_endpoints.api.endpoints.chat import router as chat_router_rpc
 from bisheng.open_endpoints.api.endpoints.citation import router as citation_router_rpc
 from bisheng.open_endpoints.api.endpoints.filelib import router as filelib_router_rpc
 from bisheng.open_endpoints.api.endpoints.flow import router as flow_router_rpc
+from bisheng.open_endpoints.api.endpoints.flow_templates import router as flow_templates_router_rpc
 from bisheng.open_endpoints.api.endpoints.workflow import router as workflow_router_rpc
 from bisheng.open_endpoints.api.endpoints.workstation import router as workstation_router_rpc
 
@@ -14,6 +15,7 @@ __all__ = [
     'citation_router_rpc',
     'filelib_router_rpc',
     'flow_router_rpc',
+    'flow_templates_router_rpc',
     'knowledge_router_rpc',
     'workflow_router_rpc',
     'workstation_router_rpc',

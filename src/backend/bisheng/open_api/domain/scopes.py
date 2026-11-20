@@ -48,7 +48,13 @@ OPEN_API_SCOPES: tuple[OpenApiScope, ...] = (
     ),
     OpenApiScope(
         "workflow:read",
-        (("GET", f"{_V2}/flows/{{flow_id}}"),),
+        (
+            ("GET", f"{_V2}/flows/{{flow_id}}"),
+            # F005 workflow-as-code: node templates for the CLI. A static read,
+            # but it lives behind the key-auth wall so the template catalogue is
+            # not an anonymous surface.
+            ("GET", f"{_V2}/flow/node_templates"),
+        ),
         "app",
         "openApiManagement.scopes.workflow_read.label",
         "openApiManagement.scopes.workflow_read.desc",

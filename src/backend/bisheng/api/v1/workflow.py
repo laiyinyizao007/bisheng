@@ -34,6 +34,7 @@ from bisheng.role.domain.services.quota_service import QuotaResourceType, requir
 from bisheng.share_link.api.dependencies import header_share_token_parser
 from bisheng.share_link.domain.models.share_link import ShareLink
 from bisheng.utils import generate_uuid
+from bisheng.workflow.common.node_templates import NODE_TEMPLATES
 from bisheng_langchain.utils.requests import Requests
 
 router = APIRouter(prefix="/workflow", tags=["Workflow"])
@@ -51,6 +52,18 @@ FORCE_SAVE_ERROR_MESSAGES = {
 # "No changes since the last save" -- nothing to flush, so the template on
 # storage already matches what the user sees. Report it as saved, not failed.
 FORCE_SAVE_NO_CHANGES = 4
+
+
+@router.get("/node_templates")
+async def get_node_templates(
+    login_user: UserPayload = Depends(UserPayload.get_login_user),
+):
+    """工作流节点模板——12 类节点的模板定义。
+
+    模板由后端持有——``bisheng.workflow.common.node_templates``——前端与命令行工具
+    从这里取同一份数据。响应里只有结构与参数键——界面文案由前端本地化资源提供。
+    """
+    return resp_200(data=NODE_TEMPLATES)
 
 
 @router.get("/write/auth")

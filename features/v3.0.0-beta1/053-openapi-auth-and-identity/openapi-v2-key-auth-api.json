@@ -2752,6 +2752,32 @@
           }
         ]
       }
+    },
+    "/api/v2/flow/node_templates": {
+      "get": {
+        "tags": [
+          "OpenAPI",
+          "FlowV2"
+        ],
+        "summary": "Get Node Templates",
+        "description": "工作流节点模板——与 v1 ``GET /api/v1/workflow/node_templates`` 同一份数据。\n\n响应走 v2 既有读端点的 ``resp_200`` 信封（design.md 手动验证用 ``.data`` 取数），\n与 ``GET /api/v2/flows/{flow_id}`` 保持同一形状。",
+        "operationId": "get_node_templates_api_v2_flow_node_templates_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
