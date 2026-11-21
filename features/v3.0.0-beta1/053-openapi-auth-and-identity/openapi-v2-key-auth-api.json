@@ -2778,6 +2778,469 @@
           }
         ]
       }
+    },
+    "/api/v2/flows": {
+      "post": {
+        "tags": [
+          "OpenAPI",
+          "FlowV2"
+        ],
+        "summary": "Create a workflow",
+        "description": "创建工作流——v1 ``POST /api/v1/workflow/create`` 的开放 API 通道。\n\n门槛与 v1 对齐（不因换了凭据类型而放松）：创建门槛是\"新建应用\"菜单\n（超管短路），配额走 ``WORKFLOW`` 资源类型；剩下的编排在\n``FlowService.create_workflow`` 里，与 v1 同一份实现。",
+        "operationId": "create_workflow_api_v2_flows_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenFlowCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bisheng__api__v1__schemas__UnifiedResponseModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v2/flows/{flow_id}/versions": {
+      "post": {
+        "tags": [
+          "OpenAPI",
+          "FlowV2"
+        ],
+        "summary": "Create a workflow version",
+        "description": "创建新版本（AC-25：新版本永远是新增一行，不覆盖既有版本）。",
+        "operationId": "create_version_api_v2_flows__flow_id__versions_post",
+        "parameters": [
+          {
+            "name": "flow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Flow Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenFlowVersionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bisheng__api__v1__schemas__UnifiedResponseModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiBearer": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "OpenAPI",
+          "FlowV2"
+        ],
+        "summary": "List workflow versions",
+        "description": "版本列表——``bisheng flow diff`` 的基准数据（AC-29：报版本 id 与名字）。",
+        "operationId": "get_versions_api_v2_flows__flow_id__versions_get",
+        "parameters": [
+          {
+            "name": "flow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Flow Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bisheng__api__v1__schemas__UnifiedResponseModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v2/flows/{flow_id}/versions/{version_id}": {
+      "put": {
+        "tags": [
+          "OpenAPI",
+          "FlowV2"
+        ],
+        "summary": "Update a workflow version",
+        "description": "更新既有版本内容（线上当前版本会被 10525 拒——先下线再改）。",
+        "operationId": "update_version_api_v2_flows__flow_id__versions__version_id__put",
+        "parameters": [
+          {
+            "name": "flow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Flow Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Version Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenFlowVersionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bisheng__api__v1__schemas__UnifiedResponseModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiBearer": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "OpenAPI",
+          "FlowV2"
+        ],
+        "summary": "Read one workflow version",
+        "description": "读任意一个版本——push 前核对\"线上那个版本到底是什么\"。",
+        "operationId": "get_version_info_api_v2_flows__flow_id__versions__version_id__get",
+        "parameters": [
+          {
+            "name": "flow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Flow Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bisheng__api__v1__schemas__UnifiedResponseModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v2/flows/{flow_id}/versions/{version_id}/activate": {
+      "post": {
+        "tags": [
+          "OpenAPI",
+          "FlowV2"
+        ],
+        "summary": "Switch the workflow's current version",
+        "description": "把某版本切为当前版本；线上工作流被 10525 拒（AC-27：可操作的报错，不是假成功）。",
+        "operationId": "activate_version_api_v2_flows__flow_id__versions__version_id__activate_post",
+        "parameters": [
+          {
+            "name": "flow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Flow Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bisheng__api__v1__schemas__UnifiedResponseModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v2/tools": {
+      "get": {
+        "tags": [
+          "OpenAPI",
+          "FlowV2"
+        ],
+        "summary": "List usable tools",
+        "description": "可用工具清单（含子工具）——编译器按 operationId 解析 ``tool_key`` 的依据。",
+        "operationId": "list_tools_api_v2_tools_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bisheng__api__v1__schemas__UnifiedResponseModel"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "OpenAPI",
+          "FlowV2"
+        ],
+        "summary": "Register a tool type",
+        "description": "注册工具类型与子工具。配额与 v1 ``POST /api/v1/tool`` 同一资源类型。",
+        "operationId": "create_tool_api_v2_tools_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenToolTypeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bisheng__api__v1__schemas__UnifiedResponseModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v2/tools/schema": {
+      "post": {
+        "tags": [
+          "OpenAPI",
+          "FlowV2"
+        ],
+        "summary": "Parse an OpenAPI document into a tool draft",
+        "description": "OpenAPI 文档 → 工具草稿（``flow tool register`` 的第一步，先解析后落库）。",
+        "operationId": "parse_tool_schema_api_v2_tools_schema_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenToolSchemaParseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bisheng__api__v1__schemas__UnifiedResponseModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OpenApiBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -4750,6 +5213,115 @@
         "title": "OpenDailyToolPayload",
         "type": "object"
       },
+      "OpenFlowCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name",
+            "description": "Workflow name, unique per owner"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Workflow description"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Workflow graph data (nodes/edges/viewport)"
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo",
+            "description": "Workflow logo"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "OpenFlowCreate"
+      },
+      "OpenFlowVersionCreate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Version name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Version description"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Workflow graph data (nodes/edges/viewport)"
+          },
+          "original_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Version Id",
+            "description": "Source version this one was copied from"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "OpenFlowVersionCreate"
+      },
       "OpenTaskFileRef": {
         "description": "One attachment, exactly as ``POST /api/v2/knowledge/upload`` returned it.",
         "properties": {
@@ -4902,6 +5474,257 @@
         ],
         "title": "OpenTaskSubmitReq",
         "type": "object"
+      },
+      "OpenToolCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 125,
+            "minLength": 1,
+            "title": "Name",
+            "description": "Operation name (operationId)"
+          },
+          "desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Desc",
+            "description": "Operation description"
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo",
+            "description": "Tool logo"
+          },
+          "tool_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Key",
+            "description": "Draft tool key; the server re-derives it on insert"
+          },
+          "api_params": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Params",
+            "description": "Operation parameters"
+          },
+          "extra": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra",
+            "description": "Operation extras (method, path, ...)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "OpenToolCreate",
+        "description": "One tool (an API operation) inside a registration request.\n\nNo ``type`` / ``tool_key`` ownership fields beyond what the draft carries:\nthe DAO assigns ``type`` and derives ``tool_key``; ``user_id`` /\n``tenant_id`` / ``is_preset`` / ``is_delete`` are stamped by the service."
+      },
+      "OpenToolSchemaParseRequest": {
+        "properties": {
+          "file_content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "File Content",
+            "description": "Raw OpenAPI document content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "file_content"
+        ],
+        "title": "OpenToolSchemaParseRequest",
+        "description": "Parse an OpenAPI document the caller already holds.\n\nNo ``download_url`` (v1 has one): fetching an arbitrary URL on behalf of a\nmachine key is an SSRF surface (no scheme / private-range / timeout guard in\nthe shared fetch helper), and the CLI reads a local file anyway."
+      },
+      "OpenToolTypeCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name",
+            "description": "Tool type name, unique per owner"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Tool type description"
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo",
+            "description": "Tool type logo"
+          },
+          "server_host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Host",
+            "description": "Base URL the tools call"
+          },
+          "auth_method": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth Method",
+            "description": "Authentication method"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key",
+            "description": "API key used when auth_method requires one (v1 cap)"
+          },
+          "auth_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auth Type",
+            "description": "Authentication type"
+          },
+          "is_preset": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "const": 0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Preset",
+            "description": "Tool type kind: 0 = custom OpenAPI tool"
+          },
+          "openapi_schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openapi Schema",
+            "description": "OpenAPI / MCP schema the tools were parsed from"
+          },
+          "parameter_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameter Name",
+            "description": "Custom auth header/query parameter name"
+          },
+          "api_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Location",
+            "description": "Where the custom parameter goes: header or query"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/OpenToolCreate"
+            },
+            "type": "array",
+            "title": "Children",
+            "description": "Tools under this type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "OpenToolTypeCreate",
+        "description": "Register a tool type with its tools — the v2 write body.\n\nNarrower than v1's ``GptsToolsTypeRead`` body: no ``id`` / ``user_id`` /\n``tenant_id`` / ``is_shared`` / ``is_delete`` / ``extra``. v1's service\noverwrites some of those but not ``is_shared`` (tenant-wide sharing root)\nnor the children's ``tenant_id``; a new face does not inherit that gap.\n\nOptional fields default to ``None`` and the endpoint dumps with\n``exclude_unset`` — the v1 model's own defaults apply, none are copied here."
       },
       "OpenWorkflowInvokeRequest": {
         "properties": {

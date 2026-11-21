@@ -7,6 +7,7 @@ from typing import Union
 from fastapi import Request
 from fastapi.encoders import jsonable_encoder
 from loguru import logger
+from sqlmodel import select
 
 from bisheng.api.services.audit_log import AuditLogService
 from bisheng.api.v1.schemas import (
@@ -24,13 +25,15 @@ from bisheng.common.errcode.flow import (
     CurVersionDelError,
     NotFoundVersionError,
     VersionNameExistsError,
+    WorkflowNameExistsError,
     WorkFlowOnlineEditError,
 )
 from bisheng.common.errcode.http_error import NotFoundError, UnAuthorizedError
 from bisheng.common.services import telemetry_service
 from bisheng.common.services.base import BaseService
+from bisheng.core.database import get_sync_db_session
 from bisheng.core.logger import trace_id_var
-from bisheng.database.models.flow import Flow, FlowDao, FlowStatus, FlowType
+from bisheng.database.models.flow import Flow, FlowCreate, FlowDao, FlowRead, FlowStatus, FlowType
 from bisheng.database.models.flow_version import FlowVersion, FlowVersionDao, FlowVersionRead
 from bisheng.database.models.group_resource import GroupResourceDao, ResourceTypeEnum
 from bisheng.database.models.session import MessageSessionDao
@@ -73,12 +76,17 @@ class FlowService(BaseService):
         cls,
         user: UserPayload,
         version_id: int,
+        expected_flow_id: str | None = None,
     ) -> UnifiedResponseModel[FlowVersion]:
         """
         According to versionIDGet version details
+
+        ``expected_flow_id`` (v2 ``/flows/{flow_id}/versions/{version_id}``): a
+        version that belongs to another flow is reported as not found, the
+        same as ``change_current_version``. v1 has no flow in the path.
         """
         data = FlowVersionDao.get_version_by_id(version_id)
-        if data is None:
+        if data is None or (expected_flow_id is not None and data.flow_id != expected_flow_id):
             return NotFoundVersionError.return_resp()
         await require_business_action(
             user,
@@ -198,17 +206,24 @@ class FlowService(BaseService):
 
     @classmethod
     async def update_version_info(
-        cls, request: Request, user: UserPayload, version_id: int, flow_version: FlowVersionCreate
+        cls,
+        request: Request,
+        user: UserPayload,
+        version_id: int,
+        flow_version: FlowVersionCreate,
+        expected_flow_id: str | None = None,
     ) -> UnifiedResponseModel[FlowVersion]:
         """
         It updates version information.
+
+        ``expected_flow_id``: see ``get_version_info`` — checked before any write.
         """
         await telemetry_service.log_event(
             user_id=user.user_id, event_type=BaseTelemetryTypeEnum.EDIT_APPLICATION, trace_id=trace_id_var.get()
         )
         # Contains the deleted version. If the version is deleted, revert to this version
         version_info = await FlowVersionDao.aget_version_by_id(version_id, include_delete=True)
-        if not version_info:
+        if not version_info or (expected_flow_id is not None and version_info.flow_id != expected_flow_id):
             return NotFoundVersionError.return_resp()
         flow_info = await cls.judge_flow_write_permission(user, version_info.flow_id)
 
@@ -357,6 +372,52 @@ class FlowService(BaseService):
     async def exec_flow_node(cls, inputs: dict, tweaks: dict, index: int, versions: list[FlowVersion]):
         # Gantianswer
         raise ValueError("flow is not supported")
+
+    @classmethod
+    async def create_workflow(
+        cls, request: Request, login_user: UserPayload, flow: FlowCreate
+    ) -> UnifiedResponseModel[FlowRead]:
+        """Create one workflow — the single implementation behind both write faces.
+
+        v1 ``POST /api/v1/workflow/create`` (browser, JWT) and v2
+        ``POST /api/v2/flows`` (F005, API key) must not grow into two copies of
+        the same choreography: the duplicate-name check, the owner/tenant
+        stamping, the implicit v0 current version and the create hook are all
+        load-bearing. Callers gate **who** may call this (v1: the
+        ``get_app_creator_user`` dependency; v2: resource-owner resolution +
+        the create-app menu gate + quota) — this method only gates **what**
+        may be created.
+        """
+        # Determine if the user repeats the skill name
+        with get_sync_db_session() as session:
+            if session.exec(
+                select(Flow)
+                .where(Flow.is_delete == 0)
+                .where(
+                    Flow.name == flow.name,
+                    Flow.flow_type == FlowType.WORKFLOW.value,
+                    Flow.user_id == login_user.user_id,
+                )
+            ).first():
+                raise WorkflowNameExistsError.http_exception()
+        flow.user_id = login_user.user_id
+        db_flow = Flow.model_validate(flow)
+        # Defense-in-depth: Flow.tenant_id default is None and the framework's
+        # before_flush hook (bisheng.core.database.tenant_filter) auto-fills it
+        # from current_tenant_id. Keeping this explicit assignment so future
+        # callers without an HTTP middleware (CLI, scripts) still set it right.
+        db_flow.tenant_id = login_user.tenant_id
+        db_flow.create_time = None
+        db_flow.update_time = None
+        db_flow.flow_type = FlowType.WORKFLOW.value
+        # Create New Skill
+        db_flow = FlowDao.create_flow(db_flow, FlowType.WORKFLOW.value)
+
+        current_version = FlowVersionDao.get_version_by_flow(db_flow.id)
+        ret = FlowRead.model_validate(db_flow)
+        ret.version_id = current_version.id
+        await cls.create_flow_hook(request, login_user, db_flow)
+        return resp_200(data=ret)
 
     @classmethod
     async def create_flow_hook(

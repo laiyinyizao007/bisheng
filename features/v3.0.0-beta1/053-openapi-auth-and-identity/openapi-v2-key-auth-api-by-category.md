@@ -1,9 +1,9 @@
-# v2 密钥鉴权 API 接口文档（四大分类）
+# v2 密钥鉴权 API 接口文档（五大分类）
 
 > 可导入文件：[`openapi-v2-key-auth-api-by-category.json`](./openapi-v2-key-auth-api-by-category.json)  
 > OpenAPI：3.1.0  
-> 本文档收录：**41 个 HTTP 接口 + 2 个 WebSocket 接口，共 43 个接口**。  
-> 分类顺序：知识库 → 日常模式会话 → 工作流 → 助手。
+> 本文档收录：**51 个 HTTP 接口 + 2 个 WebSocket 接口，共 53 个接口**。  
+> 分类顺序：知识库 → 日常模式会话 → 工作流 → 工具 → 助手。
 
 按“请求方法 + 路径”计数，同一路径的 GET、POST、PUT 分别计数；SSE 属于对应的 HTTP 接口。
 
@@ -13,9 +13,10 @@
 |---|---:|---:|---:|---|
 | [知识库](#knowledge) | 28 | 0 | **28** | knowledge:read、knowledge:write |
 | [日常模式会话](#daily-chat) | 5 | 0 | **5** | chat:invoke |
-| [工作流](#workflow) | 3 | 1 | **4** | workflow:read、workflow:invoke |
+| [工作流](#workflow) | 10 | 1 | **11** | workflow:read、workflow:write、workflow:invoke |
+| [工具](#tools) | 3 | 0 | **3** | workflow:read、workflow:write |
 | [助手](#assistant) | 5 | 1 | **6** | assistant:read、assistant:invoke |
-| **合计** | **41** | **2** | **43** | |
+| **合计** | **51** | **2** | **53** | |
 
 **使用方式**
 
@@ -2917,7 +2918,7 @@ HTTP 状态：`200`。
 
 ## 工作流
 
-共 **4 个接口**（HTTP 3 个，WebSocket 1 个）。包括工作流详情、执行、停止和 WebSocket 对话。WebSocket 已纳入本类数量。
+共 **11 个接口**（HTTP 10 个，WebSocket 1 个）。包括节点模板、工作流详情、版本读写、版本切换、执行、停止和 WebSocket 对话。WebSocket 已纳入本类数量。写端点（创建/更新/切换）仅服务账号模式（S），且要求密钥归属人对该工作流具备编辑权。
 
 | 功能组 | 接口用途 | 方法 | 路径 | 权限位 |
 |---|---|---|---|---|
@@ -2925,6 +2926,13 @@ HTTP 状态：`200`。
 | 调用 | [执行工作流](#workflow-02) | POST | `/api/v2/workflow/invoke` | `workflow:invoke` |
 | 调用 | [停止工作流](#workflow-03) | POST | `/api/v2/workflow/stop` | `workflow:invoke` |
 | WebSocket | [工作流交互连接](#workflow-04) | WS | `/api/v2/workflow/chat/{workflow_id}` | `workflow:invoke` |
+| 模板 | [节点模板](#workflow-05) | GET | `/api/v2/flow/node_templates` | `workflow:read` |
+| 版本 | [版本列表](#workflow-06) | GET | `/api/v2/flows/{flow_id}/versions` | `workflow:read` |
+| 版本 | [版本详情](#workflow-07) | GET | `/api/v2/flows/{flow_id}/versions/{version_id}` | `workflow:read` |
+| 写入 | [创建工作流](#workflow-08) | POST | `/api/v2/flows` | `workflow:write` |
+| 写入 | [创建版本](#workflow-09) | POST | `/api/v2/flows/{flow_id}/versions` | `workflow:write` |
+| 写入 | [更新版本](#workflow-10) | PUT | `/api/v2/flows/{flow_id}/versions/{version_id}` | `workflow:write` |
+| 写入 | [切换当前版本](#workflow-11) | POST | `/api/v2/flows/{flow_id}/versions/{version_id}/activate` | `workflow:write` |
 
 <a id="workflow-01"></a>
 
@@ -2996,6 +3004,270 @@ HTTP 状态：`200`。
   }
 }
 ```
+
+<a id="workflow-05"></a>
+
+### `GET /api/v2/flow/node_templates`
+
+**接口用途：查询工作流节点模板。**
+
+与 v1 `GET /api/v1/workflow/node_templates` 同一份数据；12 类节点齐全，每类含 `type`、模板版本 `v` 与 `group_params`。响应不含界面文案。
+
+#### 基本信息
+
+| 项目 | 值 |
+|---|---|
+| URL | `/api/v2/flow/node_templates` |
+| 请求方式 | `GET` |
+| 鉴权头 | `Authorization: Bearer <API_KEY>`，必填 |
+| 权限位 | `workflow:read` |
+| 身份模式 | `S/D` |
+
+#### 请求示例
+
+```bash
+curl -X GET "$BISHENG_API_BASE/api/v2/flow/node_templates" \
+  -H "Authorization: Bearer $BISHENG_API_KEY"
+```
+
+#### 成功响应
+
+HTTP 状态：`200`。
+
+#### 返回字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `status_code` | `integer` | 业务状态码；成功固定为 200 |
+| `status_message` | `string` | 状态说明 |
+| `data` | `array` | 节点模板清单（12 类） |
+| `data[].type` | `string` | 节点类型 |
+| `data[].v` | `integer` | 模板版本号 |
+| `data[].group_params` | `array` | 参数分组清单 |
+
+<a id="workflow-06"></a>
+
+### `GET /api/v2/flows/{flow_id}/versions`
+
+**接口用途：列出工作流全部版本。**
+
+版本 id 是 diff 基准与 activate 目标的标识。
+
+#### 基本信息
+
+| 项目 | 值 |
+|---|---|
+| URL | `/api/v2/flows/{flow_id}/versions` |
+| 请求方式 | `GET` |
+| 鉴权头 | `Authorization: Bearer <API_KEY>`，必填 |
+| 权限位 | `workflow:read` |
+| 身份模式 | `S/D` |
+
+#### 请求参数
+
+| 位置 | 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---:|---|---|
+| path | `flow_id` | `string(uuid)` | 是 | `—` | 工作流 ID |
+
+#### 请求示例
+
+```bash
+curl -X GET "$BISHENG_API_BASE/api/v2/flows/22222222-2222-2222-2222-222222222222/versions" \
+  -H "Authorization: Bearer $BISHENG_API_KEY"
+```
+
+#### 成功响应
+
+HTTP 状态：`200`。`data` 为版本对象数组（`id` / `name` / `data` / `is_current`）。
+
+<a id="workflow-07"></a>
+
+### `GET /api/v2/flows/{flow_id}/versions/{version_id}`
+
+**接口用途：读取任意一个历史版本。**
+
+push 前核对“线上那个版本到底是什么”。
+
+#### 基本信息
+
+| 项目 | 值 |
+|---|---|
+| URL | `/api/v2/flows/{flow_id}/versions/{version_id}` |
+| 请求方式 | `GET` |
+| 鉴权头 | `Authorization: Bearer <API_KEY>`，必填 |
+| 权限位 | `workflow:read` |
+| 身份模式 | `S/D` |
+
+#### 请求参数
+
+| 位置 | 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---:|---|---|
+| path | `flow_id` | `string(uuid)` | 是 | `—` | 工作流 ID |
+| path | `version_id` | `integer` | 是 | `—` | 版本 ID |
+
+#### 请求示例
+
+```bash
+curl -X GET "$BISHENG_API_BASE/api/v2/flows/22222222-2222-2222-2222-222222222222/versions/3" \
+  -H "Authorization: Bearer $BISHENG_API_KEY"
+```
+
+#### 成功响应
+
+HTTP 状态：`200`。返回单个版本对象。
+
+路径中的 `flow_id` 必须与版本实际所属的工作流一致，否则返回 `10500`（版本不存在），与切换当前版本同一语义；不一致时不会做任何修改。
+
+<a id="workflow-08"></a>
+
+### `POST /api/v2/flows`
+
+**接口用途：创建工作流。**
+
+创建门槛与 v1 对齐：要求密钥归属人具备“新建应用”菜单权限（超管短路），并计入 `WORKFLOW` 资源类型配额。同名工作流已存在时返回 `10529`。请求体不接受任何身份字段（多传即被拒绝）。`data` 若给出，必须同时含 `nodes` 与 `edges`，否则在请求校验阶段即被拒绝（400），与 v1 同一规则；创建版本、更新版本同样适用。
+
+#### 基本信息
+
+| 项目 | 值 |
+|---|---|
+| URL | `/api/v2/flows` |
+| 请求方式 | `POST` |
+| 鉴权头 | `Authorization: Bearer <API_KEY>`，必填 |
+| 权限位 | `workflow:write` |
+| 身份模式 | `S` |
+
+#### 请求参数
+
+| 位置 | 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---:|---|---|
+| body | `name` | `string` | 是 | `—` | 工作流名称，同一归属人下唯一 |
+| body | `description` | `string` | 否 | `null` | 工作流说明 |
+| body | `data` | `object` | 否 | `null` | 工作流节点与连线配置 |
+| body | `logo` | `string` | 否 | `null` | 图标地址 |
+
+#### 请求示例
+
+```bash
+curl -X POST "$BISHENG_API_BASE/api/v2/flows" \
+  -H "Authorization: Bearer $BISHENG_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "研究工作流", "data": {"nodes": [], "edges": []}}'
+```
+
+#### 成功响应
+
+HTTP 状态：`201`。返回新工作流（含 `data.id` 与首个 `data.version_id`）。
+
+<a id="workflow-09"></a>
+
+### `POST /api/v2/flows/{flow_id}/versions`
+
+**接口用途：创建新版本。**
+
+新版本永远是新增一行，不覆盖、不改既有版本；是否当前版本只由 activate 切换。业务授权要求密钥归属人对该工作流具备编辑权（FGA 判定，不过则 403）。版本名重复返回 `10502`。
+
+#### 基本信息
+
+| 项目 | 值 |
+|---|---|
+| URL | `/api/v2/flows/{flow_id}/versions` |
+| 请求方式 | `POST` |
+| 鉴权头 | `Authorization: Bearer <API_KEY>`，必填 |
+| 权限位 | `workflow:write` |
+| 身份模式 | `S` |
+
+#### 请求参数
+
+| 位置 | 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---:|---|---|
+| path | `flow_id` | `string(uuid)` | 是 | `—` | 工作流 ID |
+| body | `name` | `string` | 否 | `null` | 版本名称 |
+| body | `description` | `string` | 否 | `null` | 版本说明 |
+| body | `data` | `object` | 否 | `null` | 该版本的节点与连线配置 |
+| body | `original_version_id` | `integer` | 否 | `null` | 复制来源版本 ID |
+
+#### 请求示例
+
+```bash
+curl -X POST "$BISHENG_API_BASE/api/v2/flows/22222222-2222-2222-2222-222222222222/versions" \
+  -H "Authorization: Bearer $BISHENG_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "v2", "data": {"nodes": [], "edges": []}}'
+```
+
+#### 成功响应
+
+HTTP 状态：`200`。返回创建的版本对象（含 `id`、`name`、`data`、`flow_type`、`user_id`）。
+
+<a id="workflow-10"></a>
+
+### `PUT /api/v2/flows/{flow_id}/versions/{version_id}`
+
+**接口用途：更新既有版本。**
+
+线上工作流的版本会被 `10525` 拒绝——先下线再改。
+
+#### 基本信息
+
+| 项目 | 值 |
+|---|---|
+| URL | `/api/v2/flows/{flow_id}/versions/{version_id}` |
+| 请求方式 | `PUT` |
+| 鉴权头 | `Authorization: Bearer <API_KEY>`，必填 |
+| 权限位 | `workflow:write` |
+| 身份模式 | `S` |
+
+#### 请求参数
+
+| 位置 | 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---:|---|---|
+| path | `flow_id` | `string(uuid)` | 是 | `—` | 工作流 ID |
+| path | `version_id` | `integer` | 是 | `—` | 版本 ID |
+| body | `name` | `string` | 否 | `null` | 版本名称 |
+| body | `description` | `string` | 否 | `null` | 版本说明 |
+| body | `data` | `object` | 否 | `null` | 节点与连线配置 |
+
+#### 成功响应
+
+HTTP 状态：`200`。返回更新后的版本对象。
+
+路径中的 `flow_id` 必须与版本实际所属的工作流一致，否则返回 `10500`（版本不存在），与切换当前版本同一语义；不一致时不会做任何修改。
+
+<a id="workflow-11"></a>
+
+### `POST /api/v2/flows/{flow_id}/versions/{version_id}/activate`
+
+**接口用途：切换当前版本。**
+
+把某个版本切为当前版本，并同步工作流主记录的内容镜像。线上工作流被 `10525` 拒（HTTP 仍为 200，按信封 `status_code` 分支判断）。
+
+#### 基本信息
+
+| 项目 | 值 |
+|---|---|
+| URL | `/api/v2/flows/{flow_id}/versions/{version_id}/activate` |
+| 请求方式 | `POST` |
+| 鉴权头 | `Authorization: Bearer <API_KEY>`，必填 |
+| 权限位 | `workflow:write` |
+| 身份模式 | `S` |
+
+#### 请求参数
+
+| 位置 | 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---:|---|---|
+| path | `flow_id` | `string(uuid)` | 是 | `—` | 工作流 ID |
+| path | `version_id` | `integer` | 是 | `—` | 目标版本 ID |
+
+#### 请求示例
+
+```bash
+curl -X POST "$BISHENG_API_BASE/api/v2/flows/22222222-2222-2222-2222-222222222222/versions/3/activate" \
+  -H "Authorization: Bearer $BISHENG_API_KEY"
+```
+
+#### 成功响应
+
+HTTP 状态：`200`。目标版本变为当前版本；其余版本的“当前”标记自动清除。
 
 <a id="workflow-02"></a>
 
@@ -3271,6 +3543,147 @@ websocat -H='Authorization: Bearer <API_KEY>' \
   "flow_id": "22222222-2222-2222-2222-222222222222"
 }
 ```
+
+<a id="tools"></a>
+
+## 工具
+
+共 **3 个接口**（HTTP 3 个）。工具清单（读）、OpenAPI 文档解析（草稿）、工具注册（落库）。解析与注册仅服务账号模式（S）；注册计入 `tool` 资源类型配额，工具名重复返回 `15000`。
+
+| 功能组 | 接口用途 | 方法 | 路径 | 权限位 |
+|---|---|---|---|---|
+| 清单 | [可用工具清单](#tools-01) | GET | `/api/v2/tools` | `workflow:read` |
+| 解析 | [解析 OpenAPI 文档](#tools-02) | POST | `/api/v2/tools/schema` | `workflow:write` |
+| 注册 | [注册工具类型](#tools-03) | POST | `/api/v2/tools` | `workflow:write` |
+
+<a id="tools-01"></a>
+
+### `GET /api/v2/tools`
+
+**接口用途：查询可用工具清单。**
+
+按工具类型分组，子工具含 `node_template` 工作流节点模板——编译器按子工具的 `name`（operationId）解析 `tool_key` 的依据。
+
+#### 基本信息
+
+| 项目 | 值 |
+|---|---|
+| URL | `/api/v2/tools` |
+| 请求方式 | `GET` |
+| 鉴权头 | `Authorization: Bearer <API_KEY>`，必填 |
+| 权限位 | `workflow:read` |
+| 身份模式 | `S/D` |
+
+#### 请求示例
+
+```bash
+curl -X GET "$BISHENG_API_BASE/api/v2/tools" \
+  -H "Authorization: Bearer $BISHENG_API_KEY"
+```
+
+#### 成功响应
+
+HTTP 状态：`200`。
+
+#### 返回字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `status_code` | `integer` | 业务状态码；成功固定为 200 |
+| `status_message` | `string` | 状态说明 |
+| `data` | `array` | 工具类型数组 |
+| `data[].id` | `integer` | 工具类型 ID |
+| `data[].name` | `string` | 工具类型名称 |
+| `data[].children` | `array` | 子工具数组；每个含 `name`（operationId）、`tool_key` 与 `node_template` |
+
+清单不返回工具类型的 `api_key`（上游凭据明文不给机器钥匙读取；v1 浏览器面不变）。
+
+<a id="tools-02"></a>
+
+### `POST /api/v2/tools/schema`
+
+**接口用途：把 OpenAPI 文档解析成工具草稿。**
+
+注册的第一步（先解析核对，再落库）；只接受文档原文 `file_content`；v2 不提供 v1 的 `download_url`（服务端不替机器钥匙抓取任意 URL），由调用方先读入本地文件。
+
+#### 基本信息
+
+| 项目 | 值 |
+|---|---|
+| URL | `/api/v2/tools/schema` |
+| 请求方式 | `POST` |
+| 鉴权头 | `Authorization: Bearer <API_KEY>`，必填 |
+| 权限位 | `workflow:write` |
+| 身份模式 | `S` |
+
+#### 请求参数
+
+| 位置 | 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---:|---|---|
+| body | `file_content` | `string` | 是 | `—` | OpenAPI 文档原文（JSON 或 YAML），不能为空 |
+
+#### 请求示例
+
+```bash
+curl -X POST "$BISHENG_API_BASE/api/v2/tools/schema" \
+  -H "Authorization: Bearer $BISHENG_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"file_content": "openapi: 3.0.0\ninfo:\n  title: demo\npaths: {}"}'
+```
+
+#### 成功响应
+
+HTTP 状态：`200`。返回工具草稿（工具类型 + 子工具）。草稿里带有 `id`、`user_id` 等服务端字段；提交给 `POST /api/v2/tools` 前只保留该接口请求参数表列出的字段。
+
+<a id="tools-03"></a>
+
+### `POST /api/v2/tools`
+
+**接口用途：注册工具类型与子工具。**
+
+配额与 v1 `POST /api/v1/tool` 同一资源类型（`tool`）；工具名重复返回 `15000`。
+
+#### 基本信息
+
+| 项目 | 值 |
+|---|---|
+| URL | `/api/v2/tools` |
+| 请求方式 | `POST` |
+| 鉴权头 | `Authorization: Bearer <API_KEY>`，必填 |
+| 权限位 | `workflow:write` |
+| 身份模式 | `S` |
+
+#### 请求参数
+
+| 位置 | 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---:|---|---|
+| body | `name` | `string` | 是 | `—` | 工具类型名称，重复时返回 `15000` |
+| body | `description` | `string` | 否 | `""` | 工具类型说明 |
+| body | `logo` | `string` | 否 | `""` | 图标地址 |
+| body | `server_host` | `string` | 否 | `""` | 工具调用的根地址 |
+| body | `auth_method` | `integer` | 否 | `0` | 鉴权方式 |
+| body | `api_key` | `string` | 否 | `""` | 鉴权所需的 API Key，最长 1000 字符；清单接口不回显 |
+| body | `auth_type` | `string` | 否 | `basic` | 鉴权类型 |
+| body | `is_preset` | `integer` | 否 | `0` | 只接受 `0`（自定义 OpenAPI 工具）；预置（`1`）与 MCP（`2`）不在本接口范围 |
+| body | `openapi_schema` | `string` | 否 | `""` | 子工具解析来源的 OpenAPI / MCP 文档 |
+| body | `parameter_name` | `string` | 否 | `""` | 自定义鉴权参数名 |
+| body | `api_location` | `string` | 否 | `""` | 自定义参数位置：`header` 或 `query` |
+| body | `children` | `array` | 否 | `[]` | 子工具清单；每个只接受 `name`（operationId，必填，最长 125）、`desc`、`logo`（最长 512）、`tool_key`（服务端会重算）、`api_params`、`extra` |
+
+请求体不接受任何身份/作用域字段：类型层的 `id`、`user_id`、`tenant_id`、`is_shared`、`is_delete`、`extra`，子工具的 `type`、`is_preset`、`is_delete`、`user_id`、`tenant_id` 多传即被拒绝。归属人、租户、共享范围一律由服务端按密钥归属人设定。
+
+#### 请求示例
+
+```bash
+curl -X POST "$BISHENG_API_BASE/api/v2/tools" \
+  -H "Authorization: Bearer $BISHENG_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @draft.json
+```
+
+#### 成功响应
+
+HTTP 状态：`200`。返回注册后的工具类型（含生成的子工具 `tool_key`）。
 
 <a id="assistant"></a>
 

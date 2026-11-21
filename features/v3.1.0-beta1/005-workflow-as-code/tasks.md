@@ -12,7 +12,7 @@
 | spec.md | ✅ 已评审 | 44 条 AC，EARS 句型；2026-11-20 用户确认 |
 | design.md | ✅ 已评审 | 9 条决策 + 23 条坑 + AC 落点索引；2026-11-20 用户确认 |
 | tasks.md | ✅ 已拆解 | 47 个任务，7 个 Wave；2026-11-20 `/sdd-review tasks` 通过 |
-| 实现 | 🔄 进行中 | Wave 1 完成（T001–T006，6 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | Wave 1–2 完成（T001–T015，15 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -108,63 +108,63 @@
 
 > 这一波建"写"的通道（design 决策 3）。关键点：**业务逻辑一律复用既有 `WorkFlowService`，不新写授权逻辑**；身份用 `get_open_api_operator_async()` 桥接。
 
-- [ ] **T007**: 【测试】scope 注册表测试
+- [x] **T007**: 【测试】scope 注册表测试
   **文件**: `src/backend/test/open_api/test_scopes.py`
   **逻辑**: 断言 ① `workflow:write` 在 `OPEN_API_SCOPES` 里存在，其 `group` 是 `"app"`（**不是** `local_dev_toolkit`）、`label_key` / `desc_key` 前缀是 `openApiManagement.scopes.`；② `workflow:read` 的 `endpoints` 元组已含四条新读端点；③ `workflow:write` 的 `endpoints` 元组覆盖六条写端点路径；④ 元组里的每条路径**都有实际注册的路由**（比对 `app.routes`，`delegate` / `identity:read` 除外——这两个本来就没有路由）；⑤ 装饰器 `@open_api_scope("workflow:write")` 能解析（不抛 `ValueError`）
   **测试**: `test_workflow_write_scope_registered` / `test_workflow_read_scope_extended` / `test_scope_endpoints_match_registered_routes` / `test_scope_group_is_not_local_dev_toolkit`
   **覆盖 AC**: AC-38
   **依赖**: 无
 
-- [ ] **T008**: 【实现】scope 注册
+- [x] **T008**: 【实现】scope 注册
   **文件**: `src/backend/bisheng/open_api/domain/scopes.py`
   **逻辑**: ① **扩展**既有 `workflow:read` 的 `endpoints` 元组，追加 `("GET", f"{_V2}/flow/node_templates")`、`("GET", f"{_V2}/flows/{{flow_id}}/versions")`、`("GET", f"{_V2}/flows/{{flow_id}}/versions/{{version_id}}")`、`("GET", f"{_V2}/tools")`；② 新增 `OpenApiScope("workflow:write", …)`，覆盖 `POST /api/v2/flows`、`POST /api/v2/flows/{flow_id}/versions`、`PUT /api/v2/flows/{flow_id}/versions/{version_id}`、`POST /api/v2/flows/{flow_id}/versions/{version_id}/activate`、`POST /api/v2/tools`、`POST /api/v2/tools/schema`，`group="app"`。**必须与引用它的端点任务在同一提交里**（装饰器在 import 期校验）。既有 scope 条目**一行不改**（只加 `workflow:read` 的四条端点）
   **测试**: T007 全部通过
   **覆盖 AC**: AC-38, AC-44
   **依赖**: T007
 
-- [ ] **T009**: 【测试】v2 工作流端点的权限双层测试
+- [x] **T009**: 【测试】v2 工作流端点的权限双层测试
   **文件**: `src/backend/test/open_api/test_workflow_write_v2.py`
   **逻辑**: 用 `test/conftest.py` 的 `test_client` + `mock_openfga` + `tenant_context` fixture。覆盖：<br>① 缺 `workflow:write` scope → 拒绝（不建版本）；<br>② 凭据**无资源归属人** → 拒绝（不得当成"对任何工作流都有权"）；<br>③ 归属人对该工作流**无 edit 权限** → 拒绝；<br>④ `hosted_app` 主体 → 拒绝；<br>⑤ 正常路径：建版本成功、版本 `data` 等于提交值、**既有版本的 `data` 未被改写**、切当前版本后 `Flow.data` 等于新版本 data；<br>⑥ 工作流处于**上线**状态时切当前版本 → 10525；<br>⑦ 响应里**没有任何"指定他人身份"的入参**（请求体多传身份字段被拒）；<br>⑧ 读端点（`GET /versions`、`GET /versions/{id}`）只需 `workflow:read`，无需 `workflow:write`
   **测试**: `test_missing_scope_refused` / `test_no_resource_owner_refused` / `test_non_owner_edit_refused` / `test_hosted_app_refused` / `test_create_version_does_not_touch_existing_versions` / `test_activate_updates_flow_data` / `test_activate_online_workflow_returns_10525` / `test_no_impersonation_entry_point` / `test_read_endpoints_need_only_read_scope`
   **覆盖 AC**: AC-25, AC-27, AC-28, AC-29, AC-39, AC-40, AC-42, AC-43
   **依赖**: T008
 
-- [ ] **T010**: 【实现】v2 工作流端点 + 路由挂载
+- [x] **T010**: 【实现】v2 工作流端点 + 路由挂载
   **文件**: `src/backend/bisheng/open_endpoints/api/endpoints/workflow_write.py`（新）、`src/backend/bisheng/api/router.py`
   **逻辑**: router（prefix `/flows`）。端点：<br>**读**（`@open_api_scope("workflow:read")`）：`GET /{flow_id}/versions`、`GET /{flow_id}/versions/{version_id}`；<br>**写**（`@open_api_scope("workflow:write", modes=("S",))`，**仅服务账号模式**，不给"代他人写"的入口）：`POST /`、`POST /{flow_id}/versions`、`PUT /{flow_id}/versions/{version_id}`、`POST /{flow_id}/versions/{version_id}/activate`。<br>身份从 `get_current_open_api_principal()` 读，操作者用 `await get_open_api_operator_async()` 取（服务账号拿到的 `UserPayload` 角色为空、非管理员）。**业务逻辑一律委托既有 `WorkFlowService`（`api/services/flow.py`）**：`judge_flow_write_permission` / `create_new_version` / `change_current_version` / `update_version_info`。**不新写授权逻辑、不 import `database.models`、不新加 DAO 入口**
   **测试**: T009 全部通过
   **覆盖 AC**: AC-25, AC-26, AC-27, AC-28, AC-29, AC-39, AC-40, AC-42, AC-43
   **依赖**: T009
 
-- [ ] **T011**: 【测试】v2 工具端点测试
+- [x] **T011**: 【测试】v2 工具端点测试
   **文件**: `src/backend/test/open_api/test_tools_v2.py`
   **逻辑**: 覆盖：`POST /api/v2/tools/schema` 把 OpenAPI 描述解析成工具类型（每个 operation 成为一个 child，`tool_key` 非空）；`POST /api/v2/tools` 注册成功；`GET /api/v2/tools` 列出（只需 `workflow:read`）；**缺 `workflow:write` scope 时注册被拒**（不返回成功）；**缺 operationId 时注册失败并说明缺哪一项**（operationId 是工作流引用工具的唯一依据）
   **测试**: `test_schema_parses_operations` / `test_register_creates_tool_type` / `test_list_returns_registered_tools` / `test_missing_scope_refused` / `test_missing_operation_id_refused` / `test_list_needs_only_read_scope`
   **覆盖 AC**: AC-34, AC-35, AC-36, AC-37
   **依赖**: T008
 
-- [ ] **T012**: 【实现】v2 工具端点 + 路由挂载
+- [x] **T012**: 【实现】v2 工具端点 + 路由挂载
   **文件**: `src/backend/bisheng/open_endpoints/api/endpoints/tools_v2.py`（新）、`src/backend/bisheng/api/router.py`
   **逻辑**: router（prefix `/tools`）。`GET /`（列出，挂 `workflow:read`）、`POST /`（注册，挂 `workflow:write, modes=("S",)`）、`POST /schema`（解析 OpenAPI，挂 `workflow:write, modes=("S",)`）。**复用既有 `ToolServices`（`bisheng.tool.domain.services.tool`）的 `parse_openapi_schema` / `add_tools`**，不 import `bisheng.tool.api.tool`（那会命中 arch-guard RULE-5 的跨模块 API 导入）
   **测试**: T011 全部通过
   **覆盖 AC**: AC-34, AC-35, AC-36, AC-37
   **依赖**: T011
 
-- [ ] **T013**: 【测试】工具列表的 `node_template` 字段测试
+- [x] **T013**: 【测试】工具列表的 `node_template` 字段测试
   **文件**: `src/backend/test/workflow/test_tool_node_template.py`
   **逻辑**: 断言 `GET /api/v1/tool` 的每个 child **新增**了 `node_template` 字段，且它等于 `get_tool_node_template(child)` 的产出；**既有字段一字未变**（`name` / `desc` / `api_params` / `tool_key` 仍在原位）
   **测试**: `test_each_child_carries_node_template` / `test_existing_child_fields_unchanged` / `test_node_template_matches_generator`
   **覆盖 AC**: AC-04
   **依赖**: T002
 
-- [ ] **T014**: 【实现】工具列表的 `node_template` 字段
+- [x] **T014**: 【实现】工具列表的 `node_template` 字段
   **文件**: `src/backend/bisheng/tool/domain/services/tool.py`
   **逻辑**: 在 `get_tool_list` 组装 children 的地方，**附加**（不改、不删）`node_template=get_tool_node_template(child)`。纯增量字段
   **测试**: T013 全部通过
   **覆盖 AC**: AC-04
   **依赖**: T013
 
-- [ ] **T015**: 【实现】刷新开放 API 客户契约
+- [x] **T015**: 【实现】刷新开放 API 客户契约
   **文件**: `features/v3.0.0-beta1/053-openapi-auth-and-identity/openapi-v2-key-auth-api.json`、同目录的 `openapi-v2-key-auth-api.md` 与 `openapi-v2-key-auth-api-by-category.md`
   **逻辑**: 跑 `python features/v3.0.0-beta1/053-openapi-auth-and-identity/generate_openapi_contract.py` 重新生成 JSON（该脚本会强制打开 `open_platform.enabled` 再 import app，因此产出的是完整面）。再按新端点补齐两份人读 md 里按 scope 罗列端点的部分。**这是新增 v2 端点的必要配套**——`test/open_api/test_openapi_schema_contract.py::test_generated_customer_contract_matches_registered_v2_http_routes` 断言 v2 路由集与契约文档端点集**完全相等**，不刷新这条既有测试立刻红
   **测试**: `cd src/backend && uv run pytest test/open_api/test_openapi_schema_contract.py -v` 全部通过
@@ -428,3 +428,6 @@
 - **G8 第一轮审查修复（2026-11-20，44/50 无 Critical/High）**：① v2 端点从裸数组改为 `resp_200` 信封——design.md 手动验证用 `jq '.data | length'`，且既有 v2 读端点（`get_one_flow` → `UnifiedResponseModel`）都是信封形状，裸数组会让 CLI 与文档按 `.data` 取到 null；② 工具输出参数 `label` 发布的是 i18n 键 `output` 而非前端 `getToolTree` 原样的中文文案"输出变量"——这是 AC-03（不发界面文案）的**有意转换**，译文归前端 `node.tool.output`；③ 前端 `workflowTemplate` 字面量"文件在但解析不了"从静默跳过改为显式失败——常量被改名/移动时不能静默失去 live 对照
 - **G8 第二轮审查修复（2026-11-20，45/50 无 Critical/High）**：① 契约 JSON 的 `description` 因信封修复而漂移——`resp_200` 说明进 docstring 后契约里还是旧一行，已重新同步该 path 块，并在 `test_openapi_schema_contract.py` 新增 `test_f005_node_templates_contract_block_is_exact`（该 path 整块与 `app.openapi()` 逐字段比对——既有契约测试只比 operation 集与 security，metadata 漂移不红）；② `flow_templates.py` 的 `resp_200` 改从 `bisheng.common.schemas.api` 导入（照 `llm.py`/`citation.py` 先例，静态端点不拉 v1 schema 模块的重依赖）；③ `node_templates.py` 顶部注释与实际矛盾（说"不加默认值"但 `value` 默认值是黄金快照的一部分）已改写；④ 缺 scope 测试改为逐键断言错误 data 只含 `required` 说明；⑤ marker 测试显式断言 `hosted_app is False`（钉住应用型主体默认拒绝）；⑥ tool 模板测试改名 `test_tool_node_template_contract_is_frozen` 语义与保障一致
 - **T003 的"未登录 401"改为依赖装配断言**（2026-11-20）：`AuthJwt` 的密钥来自配置表，未认证请求在无数据库环境直接抛异常，状态码随环境变（401/422/500）。改为断言路由挂着 `UserPayload.get_login_user` 依赖 + 匿名调用拿不到模板数据（不论以何种方式失败）
+- **Wave 2 偏差（2026-11-21）**：① **创建工作流的编排抽成 `FlowService.create_workflow`**（T010 文件清单外改了 `api/services/flow.py` 与 `api/v1/workflow.py`）——v1/v2 两个写面共用一份实现，v1 端点只剩委托；"谁能建"（菜单门槛 + `WORKFLOW` 配额）留在各自端点，"建什么"在服务里。不这样做 v2 只能复制 v1 端点体，两份重名检查/租户赋值会漂移；② **v2 创建端点 import 了 `database.models`（`FlowCreate`）与 `WebMenuResource`**——arch-guard RULE-3 WARNING（迁移期、只告警），与 v1 `workflow.py` 同一形状；T010 写的"不 import `database.models`"对创建端点做不到（`FlowService.create_workflow` 的入参就是 `FlowCreate`）。import 在模块级，所以 arch-guard 的告警落在整个 `workflow_write.py` 上——版本端点自身不用 `database.models`，但同文件，不能说"版本端点守住了"；③ **`GET /api/v2/tools` 传 `is_preset=None`**（全部可用工具，含预置），不是只取自定义——编译器要能解析任意 operationId，预置工具也是合法引用；④ **T011 的 `test_missing_operation_id_refused` 换成 `test_service_error_codes_propagate`**——`GptsToolsTypeRead.name` 有默认值 `""`，"缺名字"不是请求校验层的事，端点层能如实守住的契约是"服务层 105xx/150xx 业务错误原样透出"；⑤ **工具清单用独立读模型**：子项 `GptsToolsWithNodeTemplate(GptsToolsRead)`（补齐表模型上的 `extra` + 声明 `node_template`——FastAPI 只序列化声明字段），类型层 `GptsToolsTypeListItem(GptsToolsTypeRead)` 只给 `get_tool_list` 用。**写模型 `GptsToolsTypeRead.children` 保持 `list[GptsTools]`**——它同时是 v1/v2 建工具的请求体，DAO 直接 `session.add_all` 子项（见 G8 R1 C1）；⑥ **契约刷新**：主契约 JSON 照上一条只增量合入 6 个新 path + 本 feature 拥有的 schema 传递闭包（最终 5 个：`OpenFlowCreate` / `OpenFlowVersionCreate` / `OpenToolSchemaParseRequest` / `OpenToolTypeCreate` / `OpenToolCreate`；中途一版漏了间接引用的 schema，被 `referenced <= schemas` 断言抓到）；`generate_openapi_contract.py` **直接覆写目标文件**，只能先跑、再从 HEAD 基线重做合并。分类版 JSON（人工策展：中文 tags/summary + `x-open-api-scope`）也只增量加入本 feature 的 10 个 operation 与新"工具"tag，不顺带补其他 feature 欠的端点。git 默认 Myers 对这份 JSON 会报出大量假删除，`--diff-algorithm=histogram` 显示为纯插入——看 diff 用 histogram；⑦ **主 md 头部"HTTP 接口：N 条"在 HEAD 就已失准**（声明 46、实际章节 42、契约 53），本次只按新增章节 +10 记为 56，既有漂移不在本 feature 修
+- **Wave 2 G8 第一轮（2026-11-21，codex，38/50）**：C1（Critical）把 `GptsToolsTypeRead.children` 改成非表读模型 → v1 `POST/PUT /api/v1/tool` 与 v2 注册全部失败（`session.add_all` 要映射类；端点测试打桩了 `add_tools` 所以没抓到）——已恢复写模型、另建只读清单模型，补真实 DAO 落库用例 `test_insert_tool_type_persists_children`；M2 `data` 缺 nodes/edges 在端点体内才校验 → 500——改在请求 schema 上委托 v1 模型的校验器，**版本创建/更新同病一并修**（复核时发现，审查只点了创建）；M3 路径 `flow_id` 被丢弃，`PUT /flows/A/versions/<B的版本>` 静默改 B——`get_version_info` / `update_version_info` 加可选 `expected_flow_id`，写前拒（10500，与 activate 同语义），v1 不传、行为不变；M4 v2 注册沿用 v1 宽松读模型当请求体，`is_shared` 与子项 `tenant_id` 可由调用方设——改窄 schema `OpenToolTypeCreate` / `OpenToolCreate`（`extra=forbid`），默认值不复制、`exclude_unset` 交给 v1 模型。L5（清单每子项算模板）与 L6（`create_workflow` 里的同步会话，v1 原样搬来）接受不改
+- **Wave 2 G8 第二轮（2026-11-21，codex 深度，38/50，确认 R1 四项修复正确）**：① `GET /api/v2/tools` 回 `api_key` 明文（v1 既有，但 v2 让只有 `workflow:read` 的机器钥匙也能读）——v2 清单摘掉 `api_key`，v1 浏览器面不动；② `POST /api/v2/tools/schema` 的 `download_url` 走共享的裸 `aiohttp.get`（无 scheme / 内网段 / 超时防护）= 机器钥匙可触发的 SSRF——v2 契约**去掉 `download_url`**，只收 `file_content`（CLI 本来就读本地文件），共享 helper 不动；③ `api_key` 超 1000 在端点体内校验 → 500 且错误里带部分密钥——请求 schema 加 `max_length=1000`；④ `is_preset` 未约束：`2`（MCP）会让服务端主动连调用方给的地址、`7` 会让 DSH 目录 KeyError——v2 只收 `0`（自定义 OpenAPI 工具）；⑤ 子工具 `name`/`logo` 无上限（列宽 125/512）——加 `max_length`，附"恰好在上限"的对照用例；⑥ RULE-3 告警覆盖整个 `workflow_write.py`——只改偏差记录措辞（见上 ②），不为消告警搬代码；⑦ 并发同名版本可重复（无唯一索引）、PUT 可复活软删版本——v1 既有行为且仍需 FGA edit，不在本 feature 修。**顺带自查出的错误**：文档与测试把 `is_preset=1` 当成 API，实际 `ToolPresetType.API = 0`、`1 = PRESET`（会被拒绝）——已更正

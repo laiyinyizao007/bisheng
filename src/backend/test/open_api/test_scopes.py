@@ -1,9 +1,12 @@
+# ruff: noqa: RUF002 - Chinese prose, full-width punctuation is intended
 import pytest
 
 from bisheng.common.services.config_service import settings
 from bisheng.open_api.domain.scopes import (
     ALWAYS_ISSUABLE_OPEN_API_SCOPE_CODES,
     LOCAL_DEV_TOOLKIT_SCOPE_CODES,
+    OPEN_API_SCOPE_IMPLIED_BY,
+    OPEN_API_SCOPE_MAP,
     OPEN_API_SCOPES,
     get_open_api_scope_marker,
     issuable_scope_codes,
@@ -61,6 +64,7 @@ def test_issuable_scopes_have_localized_presentation_metadata(monkeypatch):
         "app",
         "app",
         "app",
+        "app",  # workflow:write — F005 workflow-as-code
         "workstation",
         "knowledge",
         "knowledge",
@@ -74,6 +78,7 @@ def test_issuable_scopes_have_localized_presentation_metadata(monkeypatch):
         "app",
         "app",
         "app",
+        "app",  # workflow:write — F005 workflow-as-code
         "workstation",
         "knowledge",
         "knowledge",
@@ -93,3 +98,56 @@ def test_issuable_scopes_have_localized_presentation_metadata(monkeypatch):
 def test_registry_maps_each_endpoint_to_exactly_one_scope():
     mapped = [endpoint for scope in OPEN_API_SCOPES for endpoint in scope.endpoints]
     assert len(mapped) == len(set(mapped))
+
+
+def test_workflow_read_scope_extended():
+    """F005 T007 — ``workflow:read`` 覆盖 diff 所需的全部读面。
+
+    读当前版本（既有）、读任意版本列表/单版本（diff 基准与多版本核对）、
+    节点模板（编译器骨架来源）、工具清单（按 operationId 引用工具）。
+    """
+    endpoints = set(OPEN_API_SCOPE_MAP["workflow:read"].endpoints)
+    assert {("GET", "/api/v2/flows/{flow_id}"), ("GET", "/api/v2/flow/node_templates")} <= endpoints
+    assert {
+        ("GET", "/api/v2/flows/{flow_id}/versions"),
+        ("GET", "/api/v2/flows/{flow_id}/versions/{version_id}"),
+        ("GET", "/api/v2/tools"),
+    } <= endpoints
+
+
+def test_workflow_write_scope_registered():
+    """F005 T007 — ``workflow:write`` 已注册且覆盖全部六个写路径。"""
+    scope = OPEN_API_SCOPE_MAP["workflow:write"]
+    assert scope.endpoints == (
+        ("POST", "/api/v2/flows"),
+        ("POST", "/api/v2/flows/{flow_id}/versions"),
+        ("PUT", "/api/v2/flows/{flow_id}/versions/{version_id}"),
+        ("POST", "/api/v2/flows/{flow_id}/versions/{version_id}/activate"),
+        ("POST", "/api/v2/tools"),
+        ("POST", "/api/v2/tools/schema"),
+    )
+    assert scope.issuable is True
+    assert scope.requires_open_platform is False
+
+
+def test_scope_group_is_not_local_dev_toolkit():
+    """``workflow:write`` 是平台级能力，不是本地开发工具箱的扩展位。
+
+    group ``app`` 意味着它在任何部署上都可签发（不开 open platform 也能发），
+    且不进 ``LOCAL_DEV_TOOLKIT_SCOPE_CODES`` 的互斥/开关联动。
+    """
+    scope = OPEN_API_SCOPE_MAP["workflow:write"]
+    assert scope.group == "app"
+    assert scope.code not in LOCAL_DEV_TOOLKIT_SCOPE_CODES
+    assert scope.label_key.startswith("openApiManagement.scopes.")
+    assert scope.desc_key.startswith("openApiManagement.scopes.")
+
+
+def test_workflow_write_never_implied_by_read():
+    """读钥匙不会被暗示成写钥匙——``OPEN_API_SCOPE_IMPLIED_BY`` 里没有这对。
+
+    ``knowledge:write`` 暗示 ``knowledge:read`` 是因为写必经读；工作流写不经
+    任何读端点，且「diff 钥匙自动能 push」正是 scope 拆开要防的事。
+    """
+    assert "workflow:read" not in OPEN_API_SCOPE_IMPLIED_BY
+    assert "workflow:write" not in OPEN_API_SCOPE_IMPLIED_BY

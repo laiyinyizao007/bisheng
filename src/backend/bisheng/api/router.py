@@ -62,7 +62,9 @@ from bisheng.open_endpoints.api.router import (
     flow_router_rpc,
     flow_templates_router_rpc,
     knowledge_router_rpc,
+    tools_router_rpc_v2,
     workflow_router_rpc,
+    workflow_write_router_rpc,
     workstation_router_rpc,
 )
 from bisheng.org_sync.api.endpoints.relink import router as relink_router
@@ -174,6 +176,12 @@ router_rpc.include_router(flow_router_rpc)
 # face for the CLI (v1 serves the browser). Same NODE_TEMPLATES source, pure
 # static read, scope-enforced like every other v2 sub-router.
 router_rpc.include_router(flow_templates_router_rpc)
+# F005 workflow-as-code: /api/v2/flows/** version read/write face (consumed by
+# the CLI's diff/push). Writes are mode S only; every business decision is
+# delegated to existing FlowService methods.
+router_rpc.include_router(workflow_write_router_rpc)
+# F005 workflow-as-code: /api/v2/tools — tool list (read) + registration (write).
+router_rpc.include_router(tools_router_rpc_v2)
 router_rpc.include_router(citation_router_rpc)
 router_rpc.include_router(workstation_router_rpc)
 router_rpc.include_router(chat_router_rpc)

@@ -37,10 +37,18 @@ from bisheng.permission.application.business_authorization import (
 from bisheng.permission.application.identity import resolve_permission_actor
 from bisheng.tool.domain.const import ToolPresetType
 from bisheng.tool.domain.langchain.linsight_knowledge import SearchKnowledgeBase
-from bisheng.tool.domain.models.gpts_tools import GptsTools, GptsToolsDao, GptsToolsType, GptsToolsTypeRead
+from bisheng.tool.domain.models.gpts_tools import (
+    GptsTools,
+    GptsToolsDao,
+    GptsToolsType,
+    GptsToolsTypeListItem,
+    GptsToolsTypeRead,
+    GptsToolsWithNodeTemplate,
+)
 from bisheng.tool.domain.services.openapi import OpenApiSchema
 from bisheng.utils import get_request_ip, md5_hash
 from bisheng.utils.mask_data import JsonFieldMasker
+from bisheng.workflow.common.node_templates import get_tool_node_template
 
 from .f048_tool_permission import ToolPermissionRecord
 from .mcp_errors import mcp_error_code
@@ -48,6 +56,16 @@ from .mcp_errors import mcp_error_code
 _TOOL_VISIBLE_MAX_RESULTS = 5_000
 # Schema discovery is interactive; bound connection, initialization and listing together.
 _MCP_SCHEMA_TIMEOUT_SECONDS = 30
+
+
+def _child_with_node_template(child: GptsTools) -> GptsToolsWithNodeTemplate:
+    """F005: 一条子工具 → 带 ``node_template`` 的读模型。
+
+    ``get_tool_node_template`` 的输入是 ``GptsToolsBase`` 形状的 dict (AC-04 的
+    后端唯一实现)。清单响应里每个子工具都自带模板, 消费方不再各自拼装。
+    """
+    payload = child.model_dump()
+    return GptsToolsWithNodeTemplate.model_validate({**payload, "node_template": get_tool_node_template(payload)})
 
 
 def _flatten_mcp_error(exc: BaseException) -> str:
@@ -91,7 +109,7 @@ class ToolServices(BaseModel):
         self,
         is_preset: int | None = None,
         action: str = "use",
-    ) -> list[GptsToolsTypeRead]:
+    ) -> list[GptsToolsTypeListItem]:
         """Get a list of tools visible to users"""
         total_start = perf_counter()
         current_tid = get_current_tenant_id() or DEFAULT_TENANT_ID
@@ -188,11 +206,11 @@ class ToolServices(BaseModel):
             type_db_elapsed_ms,
         )
         tool_type_id = [one.id for one in all_tool_type]
-        res: list[GptsToolsTypeRead] = []
+        res: list[GptsToolsTypeListItem] = []
         tool_type_children = {}
         for one in all_tool_type:
             tool_type_children[one.id] = []
-            res.append(GptsToolsTypeRead.model_validate(one))
+            res.append(GptsToolsTypeListItem.model_validate(one))
 
         # Get the list of tools under the corresponding category
         children_db_start = perf_counter()
@@ -203,7 +221,9 @@ class ToolServices(BaseModel):
 
         enrich_start = perf_counter()
         for one in res:
-            one.children = tool_type_children.get(one.id, [])
+            # F005: 清单即模板目录——每个子工具带上自己的工作流节点模板
+            # (getToolTree 的后端实现)。前端与 CLI 消费同一份, 不再各自拼装。
+            one.children = [_child_with_node_template(child) for child in tool_type_children.get(one.id, [])]
 
             # Data desensitization
             one.mask_sensitive_data()

@@ -2882,6 +2882,10 @@
         "label": "Invoke workflows",
         "desc": "Run and stop workflows."
       },
+      "workflow_write": {
+        "label": "Write workflows",
+        "desc": "Create workflows, create/update versions, switch the current version, and register tools."
+      },
       "workflow_read": {
         "label": "Read workflows",
         "desc": "Read workflow definitions."
