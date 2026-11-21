@@ -12,7 +12,7 @@
 | spec.md | ✅ 已评审 | 44 条 AC，EARS 句型；2026-11-20 用户确认 |
 | design.md | ✅ 已评审 | 9 条决策 + 23 条坑 + AC 落点索引；2026-11-20 用户确认 |
 | tasks.md | ✅ 已拆解 | 47 个任务，7 个 Wave；2026-11-20 `/sdd-review tasks` 通过 |
-| 实现 | 🔄 进行中 | Wave 1–2 完成（T001–T015，15 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | Wave 1–2 完成，Wave 3 除 T017（挪到 Wave 5）外完成（24 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -175,70 +175,70 @@
 
 > 这一波把编译器建起来（design 决策 1、6、7）。CLI 侧**零新增依赖**，YAML 用 `SafeLoader` 子类。
 
-- [ ] **T016**: 【测试】CLI 命令族契约测试
+- [x] **T016**: 【测试】CLI 命令族契约测试
   **文件**: `src/bisheng-cli/tests/test_cli.py`
   **逻辑**: 参数化 over 全部已注册命令的每个叶子：① 全局 flag（`--json` / `--verbose` / `--quiet` / `--timeout` / `--no-proxy` / `--platform`）都镜像到了叶子；② `bisheng --json <cmd>` 与 `bisheng <cmd> --json` 两种顺序解析出**同一个** `json_mode`；③ `SUBCOMMANDS` 里没有桩；④ 每条退出路径恰好发出一个 `result` 事件
   **测试**: `test_every_leaf_mirrors_global_flags` / `test_flag_order_is_equivalent` / `test_no_subcommand_is_a_stub` / `test_exactly_one_result_event`
   **覆盖 AC**: AC-23
   **依赖**: 无
 
-- [ ] **T017**: 【实现】CLI `flow` 命令族接入（分发骨架）
+- [ ] **T017**: 【实现】CLI `flow` 命令族接入（分发骨架）——**挪到 Wave 5 与 T031 同批落地**（见实际偏差记录）
   **文件**: `src/bisheng-cli/bisheng_cli/cli.py`、`src/bisheng-cli/bisheng_cli/main.py`、`src/bisheng-cli/bisheng_cli/commands/flow.py`（新）
   **逻辑**: `cli.py` 的 `SUBCOMMANDS` 加 `"flow"`；`flow` 是**两 token 命令**（照 `skills` / `platforms` 的形状）：`flow` 自己的 subparser 携带动词，每个动词叶子再镜像一遍全局 flag（`default=argparse.SUPPRESS`）；`main.py` 的 `_HANDLER_PATHS` 加 `"flow": "bisheng_cli.commands.flow:run"`；`commands/flow.py` 实现分发。**此时只注册已实现的子命令**（上游铁律：命令要么注册要么不存在，绝不注册桩）——本任务只接通 `compile` 的分发路径，其余动词在后续任务里追加。三处必须同时改，否则命令注册不完整
   **测试**: T016 全部通过
   **覆盖 AC**: AC-23
   **依赖**: T016
 
-- [ ] **T018**: 【测试】YAML 加载层测试
+- [x] **T018**: 【测试】YAML 加载层测试
   **文件**: `src/bisheng-cli/tests/test_flow_spec.py`
   **逻辑**: 覆盖：① 含 `!!python/object` 标签的声明文件**被拒**（照 `project.py` 的 `yaml.safe_load` 做法，不得执行）；② `!include` 展开为文件内容（路径相对**声明文件所在目录**，不是 CWD）；③ 缺失必填顶层字段 → 本地拒绝并指出缺哪一项，**且不发起任何平台请求**（`no_network` 哨兵会抓住）；④ 顶层不是键值映射 → 拒绝；⑤ `!include` 指向缺失文件 → 报错并给出解析后的路径
   **测试**: `test_python_object_tag_is_rejected` / `test_include_expands_relative_to_spec_dir` / `test_missing_top_level_field_rejected_without_request` / `test_non_mapping_top_level_rejected` / `test_missing_include_file_reports_path`
   **覆盖 AC**: AC-07, AC-10, AC-11
   **依赖**: T017
 
-- [ ] **T019**: 【实现】YAML 加载层
+- [x] **T019**: 【实现】YAML 加载层
   **文件**: `src/bisheng-cli/bisheng_cli/flow/spec.py`
   **逻辑**: 定义 `SafeLoader` 子类并注册**唯一**一个自定义构造器 `!include`（只读文本文件、返回内容；**不 eval、不查类、不导入模块**）；`load_spec(path) -> dict` 做本地快检：可安全加载、顶层是映射、必填顶层字段齐全。**不填默认值、不裁定节点类型合法性**（那是服务端的事）
   **测试**: T018 全部通过
   **覆盖 AC**: AC-07, AC-10, AC-11
   **依赖**: T018
 
-- [ ] **T020**: 【测试】受限覆盖层测试
+- [x] **T020**: 【测试】受限覆盖层测试
   **文件**: `src/bisheng-cli/tests/test_flow_overlay.py`
   **逻辑**: 允许：覆盖 YAML 已声明节点的**已声明参数**取值、追加 YAML 未声明的**节点**、追加 YAML 未声明的**连线**。拒绝（并**逐项列出被拒项**：哪条声明的哪个参数、哪条已声明的节点/连线）：删除节点、删除连线、改一条已声明连线的 `sourceHandle` / `target`、改已声明节点的 `id` / `type`、新增 YAML 未声明的参数键
   **测试**: `test_can_override_declared_param` / `test_can_append_undeclared_node` / `test_can_append_undeclared_edge` / `test_delete_node_refused_and_itemised` / `test_delete_edge_refused_and_itemised` / `test_change_edge_handle_refused` / `test_change_node_id_refused` / `test_new_undeclared_param_refused`
   **覆盖 AC**: AC-08, AC-09
   **依赖**: T019
 
-- [ ] **T021**: 【实现】受限覆盖层
+- [x] **T021**: 【实现】受限覆盖层
   **文件**: `src/bisheng-cli/bisheng_cli/flow/overlay.py`
   **逻辑**: `apply_overlay(spec, overlay_module) -> dict`。覆盖层是一个 Python 文件，导出 `apply(spec)`；执行它（用户显式指定 `--overlay` 时执行自己的代码——这是**唯一会被执行的代码**，YAML 永远不执行）。应用结果按 T020 的语义表校验，违规**逐项报错**。**限制的是它对工作流结构的影响力，不是它的代码能力**（文档必须说清这一点）
   **测试**: T020 全部通过
   **覆盖 AC**: AC-08, AC-09
   **依赖**: T020
 
-- [ ] **T022**: 【测试】编译器测试
+- [x] **T022**: 【测试】编译器测试
   **文件**: `src/bisheng-cli/tests/test_flow_compiler.py`
   **逻辑**: 覆盖：各节点类型产出**完整**的 node 骨架（`id` / `type:"flowNode"` / `position` / `data`，`data` 里的 `group_params` 结构来自取到的模板）；`params` 里声明的键被填进对应分组对应参数；工具节点按 `tool: <operationId>` 解析出 `tool_key` 并生成工具模板骨架；**工具引用解析不到时报错**（不产出缺 `tool_key` 的节点）；`!include` 展开的提示词进入 `system_prompt` / `user_prompt`；产出 `{nodes, edges, viewport}` 三部分
   **测试**: `test_each_node_type_produces_full_skeleton` / `test_params_filled_into_matching_group` / `test_tool_node_resolves_tool_key` / `test_unknown_operation_id_is_error` / `test_included_prompt_expanded` / `test_output_has_nodes_edges_viewport`
   **覆盖 AC**: AC-06
   **依赖**: T019, T021, T014
 
-- [ ] **T023**: 【实现】编译器
+- [x] **T023**: 【实现】编译器
   **文件**: `src/bisheng-cli/bisheng_cli/flow/compiler.py`
   **逻辑**: `compile_spec(spec, templates, tools) -> dict`。流程：按 `type` 深拷贝节点模板骨架 → 把声明的 `params` 填进匹配分组的匹配参数（**按 key 匹配，不按位置**）→ 工具节点用后端提供的工具模板（由 v2 工具端点的 `node_template` 字段带回）→ 生成 edges（`id` / `source` / `sourceHandle` / `target` / `targetHandle` / `animated` / `type`）→ 产出 `{nodes, edges, viewport}`
   **测试**: T022 全部通过
   **覆盖 AC**: AC-06
   **依赖**: T022
 
-- [ ] **T024**: 【测试】编译期结构校验测试（双向用例）
+- [x] **T024**: 【测试】编译期结构校验测试（双向用例）
   **文件**: `src/bisheng-cli/tests/test_flow_validate.py`
   **逻辑**: **每条规则两条用例**——"该报的报出来" + "不该报的不误报"（只写正例的测试等于没测）。12 条规则：① 缺节点 ② 缺 start ③ 节点 id 空 / 重复 ④ 未知节点类型 ⑤ 非 end 节点无连线 ⑥ 边指向不存在的节点 ⑦ `sourceHandle` 不是该节点的合法出口（condition 的 case id 或 `right_handle`）⑧ 变量引用格式错 / 引用到的节点不存在 ⑨ 缺该节点类型的必填参数（**按 design §4.4 的必填参数表逐类型查**，`output` 节点的 `output_msg`/`message` 二选一、`agent` 的 `sql_agent` 条件必填）⑩ `batch_variable` 与 `output[i].key` 不一一对应 ⑪ `tool_key` 解析不到 ⑫ `condition` 数组 / case / 条件的必填项缺失。每条报错必须**可定位**（哪个节点、哪个参数、哪个引用）
   **测试**: 每个规则一个 `test_reports_<rule>` + 一个 `test_accepts_valid_<rule>`
   **覆盖 AC**: AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18
   **依赖**: T023
 
-- [ ] **T025**: 【实现】编译期结构校验
+- [x] **T025**: 【实现】编译期结构校验
   **文件**: `src/bisheng-cli/bisheng_cli/flow/validate.py`
   **逻辑**: `validate(compiled) -> list[Issue]`，12 条规则按 design §4.4 实现；每条 Issue 带可定位信息（节点 id / 参数键 / 引用 / 连线两端与句柄）。**只做"确定无疑"的检查**——不判断"某参数在平台上是否参与执行"，不判断"某资源 id 是否还有效"（design §5 坑 21）
   **测试**: T024 全部通过
@@ -431,3 +431,6 @@
 - **Wave 2 偏差（2026-11-21）**：① **创建工作流的编排抽成 `FlowService.create_workflow`**（T010 文件清单外改了 `api/services/flow.py` 与 `api/v1/workflow.py`）——v1/v2 两个写面共用一份实现，v1 端点只剩委托；"谁能建"（菜单门槛 + `WORKFLOW` 配额）留在各自端点，"建什么"在服务里。不这样做 v2 只能复制 v1 端点体，两份重名检查/租户赋值会漂移；② **v2 创建端点 import 了 `database.models`（`FlowCreate`）与 `WebMenuResource`**——arch-guard RULE-3 WARNING（迁移期、只告警），与 v1 `workflow.py` 同一形状；T010 写的"不 import `database.models`"对创建端点做不到（`FlowService.create_workflow` 的入参就是 `FlowCreate`）。import 在模块级，所以 arch-guard 的告警落在整个 `workflow_write.py` 上——版本端点自身不用 `database.models`，但同文件，不能说"版本端点守住了"；③ **`GET /api/v2/tools` 传 `is_preset=None`**（全部可用工具，含预置），不是只取自定义——编译器要能解析任意 operationId，预置工具也是合法引用；④ **T011 的 `test_missing_operation_id_refused` 换成 `test_service_error_codes_propagate`**——`GptsToolsTypeRead.name` 有默认值 `""`，"缺名字"不是请求校验层的事，端点层能如实守住的契约是"服务层 105xx/150xx 业务错误原样透出"；⑤ **工具清单用独立读模型**：子项 `GptsToolsWithNodeTemplate(GptsToolsRead)`（补齐表模型上的 `extra` + 声明 `node_template`——FastAPI 只序列化声明字段），类型层 `GptsToolsTypeListItem(GptsToolsTypeRead)` 只给 `get_tool_list` 用。**写模型 `GptsToolsTypeRead.children` 保持 `list[GptsTools]`**——它同时是 v1/v2 建工具的请求体，DAO 直接 `session.add_all` 子项（见 G8 R1 C1）；⑥ **契约刷新**：主契约 JSON 照上一条只增量合入 6 个新 path + 本 feature 拥有的 schema 传递闭包（最终 5 个：`OpenFlowCreate` / `OpenFlowVersionCreate` / `OpenToolSchemaParseRequest` / `OpenToolTypeCreate` / `OpenToolCreate`；中途一版漏了间接引用的 schema，被 `referenced <= schemas` 断言抓到）；`generate_openapi_contract.py` **直接覆写目标文件**，只能先跑、再从 HEAD 基线重做合并。分类版 JSON（人工策展：中文 tags/summary + `x-open-api-scope`）也只增量加入本 feature 的 10 个 operation 与新"工具"tag，不顺带补其他 feature 欠的端点。git 默认 Myers 对这份 JSON 会报出大量假删除，`--diff-algorithm=histogram` 显示为纯插入——看 diff 用 histogram；⑦ **主 md 头部"HTTP 接口：N 条"在 HEAD 就已失准**（声明 46、实际章节 42、契约 53），本次只按新增章节 +10 记为 56，既有漂移不在本 feature 修
 - **Wave 2 G8 第一轮（2026-11-21，codex，38/50）**：C1（Critical）把 `GptsToolsTypeRead.children` 改成非表读模型 → v1 `POST/PUT /api/v1/tool` 与 v2 注册全部失败（`session.add_all` 要映射类；端点测试打桩了 `add_tools` 所以没抓到）——已恢复写模型、另建只读清单模型，补真实 DAO 落库用例 `test_insert_tool_type_persists_children`；M2 `data` 缺 nodes/edges 在端点体内才校验 → 500——改在请求 schema 上委托 v1 模型的校验器，**版本创建/更新同病一并修**（复核时发现，审查只点了创建）；M3 路径 `flow_id` 被丢弃，`PUT /flows/A/versions/<B的版本>` 静默改 B——`get_version_info` / `update_version_info` 加可选 `expected_flow_id`，写前拒（10500，与 activate 同语义），v1 不传、行为不变；M4 v2 注册沿用 v1 宽松读模型当请求体，`is_shared` 与子项 `tenant_id` 可由调用方设——改窄 schema `OpenToolTypeCreate` / `OpenToolCreate`（`extra=forbid`），默认值不复制、`exclude_unset` 交给 v1 模型。L5（清单每子项算模板）与 L6（`create_workflow` 里的同步会话，v1 原样搬来）接受不改
 - **Wave 2 G8 第二轮（2026-11-21，codex 深度，38/50，确认 R1 四项修复正确）**：① `GET /api/v2/tools` 回 `api_key` 明文（v1 既有，但 v2 让只有 `workflow:read` 的机器钥匙也能读）——v2 清单摘掉 `api_key`，v1 浏览器面不动；② `POST /api/v2/tools/schema` 的 `download_url` 走共享的裸 `aiohttp.get`（无 scheme / 内网段 / 超时防护）= 机器钥匙可触发的 SSRF——v2 契约**去掉 `download_url`**，只收 `file_content`（CLI 本来就读本地文件），共享 helper 不动；③ `api_key` 超 1000 在端点体内校验 → 500 且错误里带部分密钥——请求 schema 加 `max_length=1000`；④ `is_preset` 未约束：`2`（MCP）会让服务端主动连调用方给的地址、`7` 会让 DSH 目录 KeyError——v2 只收 `0`（自定义 OpenAPI 工具）；⑤ 子工具 `name`/`logo` 无上限（列宽 125/512）——加 `max_length`，附"恰好在上限"的对照用例；⑥ RULE-3 告警覆盖整个 `workflow_write.py`——只改偏差记录措辞（见上 ②），不为消告警搬代码；⑦ 并发同名版本可重复（无唯一索引）、PUT 可复活软删版本——v1 既有行为且仍需 FGA edit，不在本 feature 修。**顺带自查出的错误**：文档与测试把 `is_preset=1` 当成 API，实际 `ToolPresetType.API = 0`、`1 = PRESET`（会被拒绝）——已更正
+- **Wave 3 偏差（2026-11-21）**：① **T017 挪到 Wave 5，与 T031 同批**——T017 要求"只接通 `compile`"，但 `compile` 的实现在 T031，且依赖 Wave 4 的客户端层取模板；Wave 3 注册 `flow compile` 就是桩命令，违反上游"命令要么注册要么不存在"，T016 的 `test_no_subcommand_is_a_stub` 本身也会拦。T016 的契约测试是**对解析器参数化**的，`flow` 一注册就自动纳入，不用改测试；② **§4.4 按引擎修正四处**（论证见 design 修订历史 2026-11-21）：#5 进出边均可、#7 只判条件节点、#8 孤立 `{{#` 是正文不是引用、#12 case 的 `operator`/`conditions` 可选，另 `agent.sql_agent` 不列必填——按原表会误报合法定义（AC-18）；③ **节点类型清单不在 CLI 硬编码**：`validate(definition, templates, tools)` 从模板推出合法类型（决策 2），必填参数表与比较符集合按设计是 CLI 侧清单；④ **DSL 补键**（design §6.5 已同步）：节点 `name`/`description`/`position`，条件 `id`/`ref`/`label`，工具 `<类型名>/<operationId>` 限定名；未知键一律编译报错；⑤ **CLI 测试夹具 `tests/fixtures/flow/node_templates.json`** 是后端 `NODE_TEMPLATES` 的冻结副本（CLI 零耦合，测不到后端常量），由后端 `test_cli_fixture_matches_backend_templates` 钉在真值上；夹具只给测试用，运行时不回落（AC-05）；⑥ **验证**：T016 对现有 7 个命令参数化全绿 + 变异探针（拿掉一个叶子的镜像 → 正好那个叶子红）；T018 的"不执行"用例先证明载荷在 `unsafe_load` 下真的会执行（初版载荷连 `unsafe_load` 都解析不了，等于什么也没证明），再证明把加载器换成不安全的会变红；T025 跑 22 个变异（15 条规则静默 + 7 条设计明确不报的越界多报）全部被杀；**用 DSL 声明 invest v3 真实工作流（13 节点 / 13 连线），编译结果与 `build_v3.build()` 逐节点逐参数零差异**、校验零问题——比对中暴露并修了三处：条件 id 无法沿用（→ DSL 可写 `id`）、条件 `left_label` 与画布约定不一致（→ 按 `<节点显示名>/<变量>` 生成）、提示词里的字面量 `{{#` 被误报（→ 规则 #8 收窄）
+- **Wave 3 G8 第一轮（2026-11-21，codex，41/50）**：F1 规则 #9 对编译产物永远不报——编译器把模板默认值（`model_id: ""`）全填上了，"键存在"恒真；实测 `BishengLLM` 对空 `model_id` 抛 `NoLlmModelConfigError` → 增 `param_empty`（只针对 llm/agent/rag 的 `model_id`，空提示词是合法的空提示词，不一刀切）；F2 `cases` 里写成平台字段名（`left_var` / `comparison_operation` / `operator`）被静默忽略 → 编译出 `null` → 引擎 pydantic 报错——编译器改为拒绝未知键、要求 `left`+`op`、`value`/`ref` 互斥、`value: null` → `""`，规则 #12 要求条件 `id` 与四字段为字符串；F3 平台列表畸形 / 非字符串类型抛原始异常 → 改报 `CliError` / 问题项；F4 覆盖层可追加与已声明节点同 id 的节点 → `node_duplicated`；F5 规则 #6 补查来源节点；F6 规则 #8 扫到了引擎从不替换的 `code` / `report` 参数（误报）→ 按参数类型限定范围；F8 `note` 节点豁免、顶层未知键报错。**不采纳 F7**（条件 case 无出边）：引擎把命中的 case 路由到空列表后静默结束、不报错，"命中即停"可能是作者本意——按 AC-18 不拦；第二轮 codex 用 langgraph 实测确认这条不采纳成立
+- **Wave 3 G8 第二轮（2026-11-21，codex 深度，42/50）**：N1（High）**单键引用 `{{#histories#}}` / `{{#query#}}` / `{{#context#}}` 在工作流里必崩**——design §4.2(c) 把它们写成"特例键"是照搬 `prompt_template.py` 过时的文档字符串，我实现时没有自己验证；实测 `get_variable_by_str('histories')` → `IndexError`，已改为报 `reference_without_node`，原先把它们当合法输入的用例同步改掉；N2/N3 `output_msg`/`message` 与 `code_input`/`code_output` 的形状；N4 case `id` 非字符串；N5 `logic: AND` 会被引擎当成 OR → 只认小写 `and`/`or`；N6 模板内部畸形 → `CliError`；N7/N8/N10 规则 #8 漏扫 `output_result.value`（`type=input` 时被替换）、工具参数（引擎按名字全部替换，不看类型）、`image_prompt` 与 `code_input` 的 `ref` 变量——全部补上。**另做了随机模糊测试**（畸形结构 × 3000 次 × 20 个种子，覆盖编译 / 校验 / 覆盖层检查）：前后共找出并修掉 11 处"抛原始异常而不是报告"的位置，最终 0 次意外异常；变异探针 30+ 条全部被杀，其中一条变异因签名不匹配而"红得不对"，修正后确认红的正是那两条针对性用例

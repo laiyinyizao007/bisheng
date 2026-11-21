@@ -264,3 +264,17 @@ def test_tool_node_template_tolerates_missing_api_params():
     template = get_tool_node_template({"id": 1, "tool_key": "k", "name": "n", "desc": "d"})
     assert template["group_params"][0]["params"] == []
     assert template["group_params"][1]["params"][0]["key"] == "output"
+
+
+CLI_TEMPLATE_FIXTURE = REPO_ROOT / "src" / "bisheng-cli" / "tests" / "fixtures" / "flow" / "node_templates.json"
+
+
+def test_cli_fixture_matches_backend_templates():
+    """F005 Wave 3：CLI 编译器/校验器的测试夹具是 NODE_TEMPLATES 的冻结副本，必须逐字相等。
+
+    CLI 与后端包零耦合，测不到后端常量——它的单测只能对着一份快照跑。这条用例
+    把快照钉在真值上：后端模板一改，这里变红，提醒同批刷新 CLI 夹具
+    （否则 CLI 的编译/校验用例会对着过期的模板全绿）。夹具只给测试用，CLI 运行时
+    从不回落到任何模板副本（AC-05）。
+    """
+    assert json.loads(CLI_TEMPLATE_FIXTURE.read_text(encoding="utf-8")) == NODE_TEMPLATES

@@ -393,7 +393,7 @@ GET  /api/v2/tools                                        → 列出（含 node_
 \{\{#([#a-zA-Z_][a-zA-Z0-9_]{0,29}|[#a-zA-Z0-9_]{1,50}\.[#a-zA-Z0-9_\.]{1,100})#\}\}
 ```
 
-另有三个特例键：`{{#histories#}}`、`{{#query#}}`、`{{#context#}}`。
+~~另有三个特例键：`{{#histories#}}`、`{{#query#}}`、`{{#context#}}`。~~ **（2026-11-21 实测更正）** 这句来自 `prompt_template.py` 的文档字符串，但**工作流引擎里没有任何节点特殊处理它们**：所有变量都经 `GraphState.get_variable_by_str` 解析，它无条件按 `.` 切分——单键引用运行时抛 `IndexError`。所以工作流里的引用只有 `<节点>.<变量>` 一种形式（校验 #8 据此报 `reference_without_node`）。
 
 **⚠ 不匹配的引用在运行时是静默不替换的**（`PromptTemplateParser.format` 的 `replacer` 里 `inputs.get(key, match.group(0))`——找不到就原样返回）。所以 AC-16 的编译期检查是硬需求。
 
@@ -446,14 +446,14 @@ GET  /api/v2/tools                                        → 列出（含 node_
 | 2 | 存在 `start` 节点 | 同上（"workflow must have start node"） |
 | 3 | 节点 `id` 非空且唯一 | `graph_engine.py` 的 `init_nodes`（"node must have attribute id"）+ 重复 id 会让 `nodes_map` 覆盖 |
 | 4 | 节点 `type` 在 12 类之内 | `workflow/nodes/node_manage.py:16-30` 的 `NODE_CLASS_MAP`（不在表内 → `instance_node` 抛 "Unknown node type"） |
-| 5 | 非 `end` 节点至少一条边 | `graph_engine.py` 的 `add_node_edge`（"must have at least one edge"） |
+| 5 | 非 `end` 节点至少一条边（**进或出均可**） | `graph_engine.py` 的 `add_node_edge`（`if not target_node_ids and not source_node_ids` → "must have at least one edge"） |
 | 6 | 每条边的 `target` 节点存在 | `graph_engine.py`（"target node {id} not found"） |
-| 7 | 每条边的 `sourceHandle` 是该节点的合法出口（condition 的某个 case id，或 `right_handle`） | `nodes/condition/condition.py:26`（`get_next_node_id(one.id)`）与 `:32`（`right_handle`） |
-| 8 | 变量引用符合 `{{#...#}}` 格式且引用到的节点存在 | `workflow/nodes/prompt_template.py:3-5`；**不匹配则运行时静默不替换** |
+| 7 | **条件节点**出边的 `sourceHandle` 是它的合法出口（某个 case id，或 `right_handle`） | `nodes/condition/condition.py:26`（`get_next_node_id(one.id)`）与 `:32`（`right_handle`）。只有 `condition` 与 `output`（choose 模式，按选项键分支）读句柄，其余节点运行时忽略句柄——所以只判条件节点，`output` 的选项键不是这里的封闭集合 |
+| 8 | 变量引用符合 `{{#...#}}` 格式且引用到的节点存在（含条件节点的 `left_var` 与 `ref` 型右值） | `workflow/nodes/prompt_template.py:3-5`；**不匹配则运行时静默不替换**。"格式错"指同一行内有收尾 `}}` 的 `{{#…}}`；孤立的 `{{#`（如提示词里提醒模型别写这个标记）是正文，引擎也不动它，不报 |
 | 9 | 节点声明了**该类型必填的参数**（见下方"按节点类型的必填参数表"） | 各节点类的 `self.node_params["..."]` 下标访问（下标 = 必填，`.get` = 可选） |
 | 10 | `llm` / `agent` 的 `batch_variable` 与 `output[i].key` 一一对应 | `nodes/llm/llm.py:58-60`（`self.node_params['output'][index]['key']`）、`nodes/agent/agent.py:552` |
 | 11 | `tool` 节点的 `tool_key` 能在已注册工具里解析到 | `nodes/tool/tool.py` 的 `tool_key` 查找 |
-| 12 | `condition` 节点有 `condition` 数组，且每个 case 有 `id` / `logic` / `conditions`，每个条件有 `left_var` / `comparison_operation` / `right_value_type` / `right_value` | `nodes/condition/condition.py:14`（`self.node_params['condition']`）与 `ConditionCases` / `ConditionOne`（`nodes/condition/conidition_case.py:11-17`，全是 `Field(...)` = 必填） |
+| 12 | `condition` 节点有 `condition` 数组，且每个 case 有 `id`，每个条件有 `left_var` / `comparison_operation`（13 个比较符之一）/ `right_value_type` / `right_value` | `nodes/condition/condition.py:14`（`self.node_params['condition']`）与 `ConditionOne`（`nodes/condition/conidition_case.py`，四个字段全是 `Field(...)` = 必填）。**case 的 `operator`（不是 `logic`）与 `conditions` 都是可选**——`ConditionCases.operator` 默认 `and`，`conditions` 为空的 case 恒为真，就是平台的 else 分支；把它们当必填会误报合法定义（AC-18）。（2026-11-21 实现时对照引擎修正） |
 
 **按节点类型的必填参数表**（校验 #9 的依据；`.get` 的是可选、不查）：
 
@@ -464,7 +464,7 @@ GET  /api/v2/tools                                        → 列出（含 node_
 | `input` | `user_input` | `dialog_files_content` | `nodes/input/input.py:59-62` |
 | `output` | `output_result`（含 `type` / `value`）、`output_msg` 或 `message`（二选一） | — | `nodes/output/output.py:22-33` |
 | `llm` | `system_prompt` / `user_prompt` / `model_id` / `batch_variable` / `output` | `output_user` | `nodes/llm/llm.py:28-60` |
-| `agent` | `system_prompt` / `user_prompt` / `model_id` / `chat_history_flag` / `tool_list` / `knowledge_id` / `batch_variable` | `user_auth` / `output_user`；`sql_agent` **条件必填**（其 `open` 为真时才被下标访问） | `nodes/agent/agent.py:268-314`、`:552` |
+| `agent` | `system_prompt` / `user_prompt` / `model_id` / `chat_history_flag` / `tool_list` / `knowledge_id` / `batch_variable` | `user_auth` / `output_user` / `sql_agent`（先 `.get` 取到且 `open` 为真才下标访问——键缺失不会崩，**不列为必填**） | `nodes/agent/agent.py:268-314`、`:552` |
 | `code` | `code_input` / `code` / `code_output` | — | `nodes/code/code.py:33-35` |
 | `qa_retriever` | `user_question` | — | `workflow/common/knowledge.py:313`（`init_user_question`） |
 | `rag` | `system_prompt` / `user_prompt` / `model_id` | — | `nodes/rag/rag.py:40-48` |
@@ -639,12 +639,15 @@ description: <描述>
 nodes:
   - id: <节点 id>
     type: <12 类之一>
+    name: <显示名>                  # 可选，缺省 = id
+    description: <说明>             # 可选
+    position: {x: 0, y: 0}         # 可选，缺省按序号排布（diff 不比较画布坐标）
     params:
       <param_key>: <值>          # 键必须是该节点模板里存在的参数键
     tab: <字符串>                  # 可选，仅 input 节点等少数类型有意义
   - id: <tool 节点 id>
     type: tool
-    tool: <operationId>           # 按操作标识引用已注册工具
+    tool: <operationId>           # 按操作标识引用已注册工具；多个工具类型同名时写 <工具类型名>/<operationId>
     params:
       <param_name>: <字符串>       # 工具参数一律字符串
 
@@ -652,11 +655,14 @@ nodes:
     type: condition
     cases:
       - id: <case id>              # 这个 id 就是出边的 sourceHandle
-        logic: and | or
-        conditions:
-          - left: <变量引用>        # 如 input_idea.user_input
+        logic: and | or            # 可选，缺省 and（编译为平台的 operator）
+        conditions:                # 可选；不写 = else 分支（恒为真）
+          - id: <条件 id>           # 可选；缺省按 <case id>_c<序号> 生成（已有线上流写原 id，免得 diff 报差异）
+            left: <变量引用>        # 如 input_idea.user_input
             op: <13 个比较符之一>
-            value: <字面量>
+            value: <字面量>          # 与 ref 二选一；right_value_type = input
+            ref: <变量引用>          # 与 value 二选一；right_value_type = ref
+            label: <显示名>          # 可选；缺省按画布约定生成 <节点显示名>/<变量名>（仅显示）
 
 edges:
   - from: <节点 id>
@@ -667,6 +673,8 @@ edges:
 - `!include <相对路径>`：在任意字符串值处展开一个文本文件（决策 7）。
 - 变量引用：`{{#node_id.var#}}`（§4.2(c)）。
 - **YAML 里的键名只有这一处定义**（CLI 的 `flow/spec.py`）；后端不读 YAML（决策 3 的"触发条件"）。
+- 节点与连线上**不认识的键一律编译报错**（如把 `params` 拼成 `parms`），不静默丢弃它携带的值。
+- 顶层必填只有 `name` / `nodes`；`edges` 缺失由校验 #5 按节点逐个指出（比"缺 edges"更可定位）。
 
 ---
 
@@ -793,3 +801,5 @@ cd src/bisheng-cli && BISHENG_CLI_RUN_NETWORK_TESTS=1 uv run pytest tests/ -m ne
 | 2026-11-20 | 决策 2 补齐 v1 + v2 两个模板端点 | 约束 2（CLI 只有服务账号密钥 ⇒ CLI 能用的后端接口必须在 v2 面） |
 | 2026-11-20 | 决策 5 明确"排除画布信息、纳入节点语义字段"的完整比较表 | 避免"只比参数值"漏掉 `tab` / `tool_key` / `name` 的真实差异 |
 | 2026-11-20 | **design 自审一轮**：新增 §2 的 Constitution Check（逐条核对 C1–C8）、§4.5 的 AC 落点索引；§4.4 补齐 12 类节点的必填参数表（原表只覆盖 input / llm，不满足 AC-15 的"某类节点"）；§5 补 3 条坑（21 平台资源 id 编译期不可校验 / 22 `output` 节点两种出参形状 / 23 `agent` 的条件必填）；§6 补内部 Python API 与平台服务依赖；决策 2 点明与 AC-01"一个只读接口"的一处读法 | 自审对照 `sdd-review/references/design-checklist.md` 的 24 项检查 |
+| 2026-11-21 | G8 两轮 codex 复核后再修 §4.2(c) 与 §4.4：单键引用 `{{#histories#}}` 等在工作流里必崩（实测 `get_variable_by_str` → `IndexError`），不是"特例键"；#8 的扫描范围按引擎实际替换处定（`var_textarea` / `var_textarea_file` / `form` 类型 + 工具节点全部参数 + `output_result` 在 `type=input` 时 + `image_prompt` 与 `code_input` 里的 `ref` 变量），不扫 `code` / `report`；#9 增 `model_id` 非空（llm/agent/rag，`BishengLLM` 拒绝空值）与 `output_msg`/`message`、`code_input`/`code_output` 的形状；#12 的 case `id` 与四个条件字段必须是字符串；条件 `logic` 只认小写 `and`/`or`（引擎把其余一律当 OR）；`note` 节点整体豁免 | codex 逐条探针复现，均对照引擎源码与实测核实后才改 |
+| 2026-11-21 | Wave 3 实现对照引擎修正 §4.4：#5 进出边均可；#7 只判条件节点；#8 孤立 `{{#` 不算引用、条件变量也查；#12 case 的 `operator`/`conditions` 可选（原文写成必填的 `logic`/`conditions`）；`agent.sql_agent` 不列必填。§6.5 补齐实现中确定的键：节点 `name`/`description`/`position`、条件 `id`/`ref`/`label`、工具限定名、未知键报错 | 按原表实现会误报合法定义（AC-18）；DSL 用 invest v3 真实工作流做了零差异的编译比对 |
