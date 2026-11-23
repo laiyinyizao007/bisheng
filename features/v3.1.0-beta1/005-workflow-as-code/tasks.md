@@ -12,7 +12,7 @@
 | spec.md | ✅ 已评审 | 44 条 AC，EARS 句型；2026-11-20 用户确认 |
 | design.md | ✅ 已评审 | 9 条决策 + 23 条坑 + AC 落点索引；2026-11-20 用户确认 |
 | tasks.md | ✅ 已拆解 | 47 个任务，7 个 Wave；2026-11-20 `/sdd-review tasks` 通过 |
-| 实现 | 🔄 进行中 | Wave 1–7 完成，仅剩 T045 的浏览器手动验证（46 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | ✅ 完成 | Wave 1–7 完成，T045 浏览器验证于 2026-11-23 在隔离环境完成（47 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -392,7 +392,7 @@
   - 服务账号签发表单里出现"工作流写入"这一项，中/英/日三种语言都显示人话（不是裸键名）
   **依赖**: T008
 
-- [ ] **T045**: 前端回归确认（自动化部分已完成：lint / typecheck / check-i18n 通过、vitest 无新增失败；**浏览器手动验证待重建本机镜像后做**）
+- [x] **T045**: 前端回归确认（自动化部分：lint / typecheck / check-i18n 通过、vitest 无新增失败；浏览器验证 2026-11-23 完成，见下方"验证结果"）
   **文件**: 无新文件（验证任务）
   **逻辑**: 跑 `pnpm lint` 与 `pnpm typecheck`、`pnpm check-i18n`；确认 `getWorkflowNodeTemplate` 的两个消费点（`pages/BuildPage/flow/Sidebar.tsx`、`pages/KnowledgePage/components/FileUploadStep4.tsx`）走的是同一个接口、拿到的是同一份数据；确认既有工作流在网页里能打开、能跑
   **覆盖 AC**: AC-02, AC-03
@@ -400,6 +400,12 @@
   - 两个消费点各自打开一次，比对拿到的模板**完全一致**
   - 打开一条既有工作流，画布正常渲染（模板搬后端后前端行为不变）
   **依赖**: T043, T044
+  **验证结果（2026-11-23，隔离环境：本分支后端 + Vite 开发服务器 + Playwright Chromium，13/13 通过）**：
+  - 接口 `node_templates` 返回 12 种；画布打开时向后端请求模板（200），节点面板列出 11 种（`start` 不列出、由画布自动放置），拖入一个基础节点后画布节点数 +1
+  - 一条由 `flow push` 建立的既有工作流在画布正常打开（3 个节点），无未捕获页面错误
+  - 自定义工具（由 `flow tool register` 注册）在"工具"页签可展开、列出其 operation，拖入后画布新增工具节点；无"工具不可用"提示
+  - 反向：拦截模板接口返回 500 → 节点面板显示失败原因与"重试"、不列出任何节点（而非空白面板）；恢复接口后点"重试" → 11 种节点恢复、提示消失。另有平台全局"Server error"弹窗，属既有的请求失败提示，非本特性
+  - **未覆盖到界面层的两项**：① 知识库快捷建流——隔离环境无 embedding / 向量库，知识库无法解析完成、建流卡片不出现；改为在页面内直接调前端的 `getWorkflowNodeTemplate`，核对 `getKnowledgeDefaultFlowTemplate` 依赖的数据（`start` / `input` / `rag` 存在，`rag` 含 `user_question`、`knowledge`（`value.value` 结构）、`user_prompt`、`model_id`、`output_user_input`）全部在。两个消费点调用的是同一个函数、同一个接口。② "能跑"未用网页"运行"按钮，运行由同一平台上的 `flow run` 端到端用例（T046）证明
 
 ### Wave 7 — 端到端与收尾
 
