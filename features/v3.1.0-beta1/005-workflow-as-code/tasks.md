@@ -12,7 +12,7 @@
 | spec.md | ✅ 已评审 | 44 条 AC，EARS 句型；2026-11-20 用户确认 |
 | design.md | ✅ 已评审 | 9 条决策 + 23 条坑 + AC 落点索引；2026-11-20 用户确认 |
 | tasks.md | ✅ 已拆解 | 47 个任务，7 个 Wave；2026-11-20 `/sdd-review tasks` 通过 |
-| 实现 | 🔄 进行中 | Wave 1–5 完成（41 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | Wave 1–6 完成，T045 的浏览器手动验证待做（44 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -365,7 +365,7 @@
 
 ### Wave 6 — 前端 Platform
 
-- [ ] **T042**: 【实现】前端节点模板改从接口取
+- [x] **T042**: 【实现】前端节点模板改从接口取
   **文件**: `src/frontend/platform/src/controllers/API/workflow.ts`
   **逻辑**: `getWorkflowNodeTemplate()` 改为 `axios.get('/api/v1/workflow/node_templates')`（走既有 `controllers/API/request` 封装，**不在 store 里直接调 HTTP**）；**删除**文件里那份约 890 行的 `workflowTemplate` 字面量。改前先用 `grep -rn "workflowTemplate" src/` 全量确认没有别的引用。**前提**：T001 已把黄金数据固化进测试文件（否则 T001 的比对会因前端字面量被删而失效）
   **覆盖 AC**: AC-01, AC-02
@@ -375,7 +375,7 @@
   - 后端接口返回 500 时，节点库侧栏给出可读原因（**不回落硬编码副本**）
   **依赖**: T004
 
-- [ ] **T043**: 【实现】前端 `getToolTree` 收口到后端
+- [x] **T043**: 【实现】前端 `getToolTree` 收口到后端
   **文件**: `src/frontend/platform/src/util/flowUtils.ts`
   **逻辑**: `getToolTree` 的**形状拼装逻辑全部删除**，改为 `children.map(c => c.node_template)`；**返回形状不变**（仍是 `{name, is_preset, children}`），前端 `Sidebar.tsx` 的消费方式不改
   **覆盖 AC**: AC-04
@@ -384,7 +384,7 @@
   - 拖一个工具节点进画布 → 节点参数区完整
   **依赖**: T014, T042
 
-- [ ] **T044**: 【实现】新 scope 的界面文案（三语言）
+- [x] **T044**: 【实现】新 scope 的界面文案（三语言）
   **文件**: `src/frontend/platform/public/locales/zh-Hans/bs.json`、`src/frontend/platform/public/locales/en-US/bs.json`、`src/frontend/platform/public/locales/ja/bs.json`
   **逻辑**: 在 `openApiManagement.scopes` 下新增 `workflow_write` 的 `label` 与 `desc`（键名与 `scopes.py` 里 `label_key` / `desc_key` 一致：`openApiManagement.scopes.workflow_write.label` / `.desc`）。**三个语言必须同时加**——`pnpm check-i18n` 校验键集对齐（参照语言 zh-Hans）。既有条目不动
   **覆盖 AC**: AC-38
@@ -392,7 +392,7 @@
   - 服务账号签发表单里出现"工作流写入"这一项，中/英/日三种语言都显示人话（不是裸键名）
   **依赖**: T008
 
-- [ ] **T045**: 前端回归确认
+- [ ] **T045**: 前端回归确认（自动化部分已完成：lint / typecheck / check-i18n 通过、vitest 无新增失败；**浏览器手动验证待重建本机镜像后做**）
   **文件**: 无新文件（验证任务）
   **逻辑**: 跑 `pnpm lint` 与 `pnpm typecheck`、`pnpm check-i18n`；确认 `getWorkflowNodeTemplate` 的两个消费点（`pages/BuildPage/flow/Sidebar.tsx`、`pages/KnowledgePage/components/FileUploadStep4.tsx`）走的是同一个接口、拿到的是同一份数据；确认既有工作流在网页里能打开、能跑
   **覆盖 AC**: AC-02, AC-03
@@ -440,3 +440,6 @@
 - **Wave 5 偏差（2026-11-22）**：① **T017 与 T031 同批落地**，`flow` 为两 / 三 token 命令（`flow tool register|list`），8 个叶子全部镜像全局 flag，T016 的参数化契约测试自动纳入；② **AC-32 需要后端配合（用户 2026-11-22 选定）**：v2 invoke 原先丢弃全部 `node_run`，失败节点只出现在被丢的那条事件里 → `PublishedWorkflowService.iter_events` 只放行"带 reason 的结束事件"，转换时只带节点标识与原因；③ **`flow run` 改走流式 invoke**（Wave 4 G8 H2 的根治）：会话标识随第一个事件到达；`--wait-timeout` 是等下一个事件的上限；非流式回包仍可解析（平台拒绝时的信封）；④ **续跑跨进程**：无人值守时停在等待输入即 exit 0，给出 `--resume r1.<base64url>` 凭据（工作流 / 会话 / 等待消息 / 节点 / 字段名，严格校验），并新增 `--input-json`（表单多字段一段文本填不了）——design §6.4 原面只有 `--input` / `--input-file`；⑤ **push 的"线上独有"以本检出上次推送的定义为共同祖先**（`.bisheng/cache/last_push.json`，design 决策 4 补充）：否则每次改参数再推都要确认，flag 会被无条件带上；⑥ **绑定文件位于声明文件旁**（不随 CWD），按平台 → 声明文件名索引；`diff` / `push` / `run` 在显式 `--flow-id` 且读取成功后写绑定；⑦ `push` 与线上全等时不建版本；`--create` 走 `POST /api/v2/flows`（平台同时建出当前版本并回 `version_id`）；⑧ `tool register` 按注册端点允许的键裁剪解析草稿并去掉空值（注册体 `extra="forbid"`，且显式 `null` 会盖掉平台默认值）；⑨ 10599 按 T041 注册为 `EXIT_FORBIDDEN`，客户端层不再加"无权修改"措辞（v1 专用码）；⑩ **验证**：新增 CLI 测试约 120 个 + 后端 6 个；CLI 全量 909 通过（失败仍为既有 6 条）；后端 `test/open_api` 改前改后失败集合逐条相同（44 条既有）；变异 51 条全部被杀（第二轮修复后一条存活：客户端"信封必须带事件列表"被命令层新加的"一轮必须以 close 或等待输入收尾"遮蔽，补了直指客户端那条规则的见证用例后被杀）
 - **Wave 5 G8 第一轮（2026-11-22，codex，42/50）**：采纳——H1 资源归属人不可用（平台以 HTTP 404/500 + 固定文案拒绝）被翻成"工作流不存在，重新 push --create" → 按文案精确识别，报 `EXIT_FORBIDDEN` 与"没有可用的资源归属人"（AC-43）；H2 免确认时结果报 `online_only_dropped: 0` 而人读说有 N 处 → 照报条数并加 `online_only_confirmation`；M5 注册回包没有操作仍报成功 → `EXIT_DEFECT`；M6 `flow.json` 改为原子替换；L7 `run` 不检查声明文件存在 → 拒绝；L8 续跑与绑定冲突的提示不可执行 → 给出 `--flow-id <凭据所属>`；L9 默认版本名秒级会撞 10502 → 加随机后缀。**部分采纳** M3（last_push 无完整性保护）：只在与线上语义全等时才被采信，损坏只会多问一次，不加校验和；文档里"machine-local"改为"本检出、不进 git"。**不采纳** M4（失败原因可能含输入）：同一段 `str(e)` 早已随收尾错误事件 `data.exception` 下发给 v2 调用方，不新增暴露面，改为在 design §6.1 登记事件增量；L10（last_push 存整份定义）：每个工作流一条，内容即仓库里 YAML 的编译结果
 - **Wave 5 G8 第二轮（2026-11-22，codex 深度，40/50）**：采纳——H1 一轮既无 `close` 也未停住却报"运行完成"（含信封缺 `events`） → `EXIT_DEFECT`；H2 `push --create` 平台已建工作流、本地绑定写失败却崩成 exit 1 且丢掉 id → 绑定写入降为告警并给出 `--flow-id`，结果带 `binding_saved`；M3 `!include` 可读仓库外文件并随 push 上传 → **推翻 design 决策 7 的"不禁止"**，限定在声明目录树内；M4 线上取值回显时第三方模型密钥（`sk-…`）不被遮蔽 → 全局掩码新增 `sk-` 规则（≥20 字符，不误伤 `sk-learn`）；M5 平台帧缺会话标识时发出自己读不回的续跑凭据 → `EXIT_DEFECT`；L6 `--create` 回包缺 `version_id` 仍报成功 → 纳入必填；L7 用户停止被报成节点失败 → `EXIT_CANCELLED`。**未纳入本次提交**：L8 工作树里的 `probe_*.py` 是 11-21 codex 审查遗留，删除待用户确认。第一轮修复全部经第二轮复验通过
+- **Wave 6 偏差（2026-11-22）**：① **T044 已在 Wave 2（`ad1aef4845`）随 scope 注册表一起交付**，三语言文案齐全，本 Wave 只补勾；② T001 的 live 对照原设计为"前端文件不在就退场"，但 T042 只删常量、文件仍在 → 改为**有正面证据才退场**（常量不在 **且** `getWorkflowNodeTemplate` 本体请求后端接口），并新增常驻断言 `test_frontend_keeps_no_template_copy`；③ `getWorkflowNodeTemplate` 除"非空列表"外**逐项校验** `type` 字符串 + `group_params` 列表（G8 第二轮：形状不对的模板会在画布拖拽回调里才炸）；失败文案用共享的 `api_errors:fallback`（带默认值，i18n 未就绪时不露键名）；④ 节点面板加载失败显示 `role=alert` 原因 + 重试按钮；`getToolTree` 缺 `node_template` 的工具不再静默消失，工具页签点名（新键 `nodeTemplatesLoadFailed` / `toolTemplatesUnavailable` / `retry`，三语言同批）；⑤ 按 `src/frontend/AGENTS.md`"谁改谁还"：触碰的 `workflow.ts` / `flowUtils.ts` 里残留的中文字面量（开发者日志与只进 console 的拒绝原因）改英文，`eslint-suppressions.json` 只减（Chinese-literal 24+4 条清零，Sidebar no-unused-vars 7→6）；Sidebar 里 `['时间','计算器','代码执行器']` 是按数据里的预置工具名过滤、不是界面文案，未动；⑥ 工具节点输出参数 `label` 由前端的 `输出变量` 变为后端的 `output`：画布按 i18n 键 `node.tool.output.label` 渲染标题（三语言都有），用户看不到 `output`（G8 两轮均复核）；⑦ **验证**：platform vitest 改前 41 条失败 / 改后 40 条（一条无关用例转绿，疑似不稳定），**无新增失败**；新增前端测试 19 个 + 后端守卫 9 个；变异 14 条全部被杀；后端模板与被删字面量逐项深相等、顺序与 `v` 一致（codex 复核）
+- **Wave 6 G8 第一轮（2026-11-22，codex，43/50）**：采纳——守卫只按整串匹配（换引号即误红、留在注释里即误绿）→ 限定在函数体内、容忍引号；缺模板工具只进 console → 工具页签点名；开发者文本直达用户 → 共享兜底文案；加重试按钮；文案改写（不用"节点库"这一新词）。**不采纳**：知识库快捷建流复用查询缓存（一次性动作，取新的更对）；返回值类型化（消费方都是 `@ts-strict-ignore` 遗留文件）；翻译遗留中文注释（超出本 Wave）
+- **Wave 6 G8 第二轮（2026-11-22，codex 深度，41/50）**：采纳——M1 单引号 / 无空格写的副本能骗过"不留副本"守卫（codex 用真实辅助函数实测）→ 前后端检测都改为任意引号、不依赖空格，并各自补检测器自身的正反用例；L3 守卫对 `export async function` 与先出现 `"https://…"` 字符串的写法误红 → 接受两种声明、去掉不识字符串的注释剥离；L4 形状不对的模板在拖拽回调里才炸 → 逐项校验；L5 i18n 未就绪时露出键名 → 默认值 + 显式兜底（实测未初始化的 i18next 连 `defaultValue` 都不返回）。**未处理并登记为已知短板**：M2 守卫与 platform vitest 不在任何 CI（需用户决定是否接入）；L6 / L7 Sidebar 两处既有问题。复核确认：无回归（模板与旧字面量深相等）、拉取不会改到编辑中的节点（三条建节点路径都深拷贝）、无 XSS（插值落在 React 文本节点）

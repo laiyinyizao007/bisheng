@@ -681,9 +681,6 @@
   "src/controllers/API/workflow.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 11
-    },
-    "no-restricted-syntax": {
-      "count": 24
     }
   },
   "src/controllers/hooks/knowledge.ts": {
@@ -1518,7 +1515,7 @@
       "count": 1
     },
     "@typescript-eslint/no-unused-vars": {
-      "count": 7
+      "count": 6
     },
     "no-restricted-syntax": {
       "count": 3
@@ -2720,9 +2717,6 @@
     },
     "no-console": {
       "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 4
     },
     "no-useless-escape": {
       "count": 6

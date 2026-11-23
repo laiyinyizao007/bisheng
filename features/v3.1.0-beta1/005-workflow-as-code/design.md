@@ -784,6 +784,8 @@ cd src/bisheng-cli && BISHENG_CLI_RUN_NETWORK_TESTS=1 uv run pytest tests/ -m ne
 | **没有"回滚"命令**。回滚 = 用旧版本的声明重新 push 一次 | `flow push` + `git revert` 已经够用 | 出现"只想切回某个旧版本、不想重新编译"的需求时，加 `flow activate --version-id` |
 | **YAML DSL 没有 schema 文件**。键名只存在于 CLI 代码里 | 后端不读 YAML，没有第二份需要同步（决策 2 的 AC-44 兑现） | 同"后端消费 YAML"的触发条件 |
 | **前端节点库首屏多一次请求** | 换取"只有一份模板" | 请求延迟实测影响首屏时（可加前端侧缓存，但**不是**副本） |
+| **（2026-11-22 Wave 6 G8）"前端不留副本"的守卫只在本地跑**。`test_frontend_keeps_no_template_copy`（后端）与 platform vitest 都不在任何 CI workflow 里：`frontend-quality.yml` 只跑 lint / typecheck / check-i18n / config 测试，后端 pytest 本就不进 CI | platform vitest 现有 40 条与本 feature 无关的既有失败，直接接进 CI 会立刻变红；后端测试需要整套后端环境 | 既有失败清零、或 CI 增设后端测试环境时，把这两组接进 `frontend-quality.yml` / 新的后端质量 workflow（需用户决策） |
+| **（2026-11-22）Sidebar 既有问题未修**：`onInitStartNode` 写在 `useMemo` 里且 `disabledNodes` 默认值每次渲染新建，空画布上会反复排起始节点；工具列表请求失败时工具页签静默为空 | 均早于本 feature，不在 T042/T043 范围 | 下次改 Sidebar 时一并处理 |
 
 ### 与 invest 仓库的关系（本 feature 落地后的迁移动作，不在本 feature 范围内）
 
@@ -806,6 +808,7 @@ cd src/bisheng-cli && BISHENG_CLI_RUN_NETWORK_TESTS=1 uv run pytest tests/ -m ne
 | 2026-11-20 | 决策 2 补齐 v1 + v2 两个模板端点 | 约束 2（CLI 只有服务账号密钥 ⇒ CLI 能用的后端接口必须在 v2 面） |
 | 2026-11-20 | 决策 5 明确"排除画布信息、纳入节点语义字段"的完整比较表 | 避免"只比参数值"漏掉 `tab` / `tool_key` / `name` 的真实差异 |
 | 2026-11-20 | **design 自审一轮**：新增 §2 的 Constitution Check（逐条核对 C1–C8）、§4.5 的 AC 落点索引；§4.4 补齐 12 类节点的必填参数表（原表只覆盖 input / llm，不满足 AC-15 的"某类节点"）；§5 补 3 条坑（21 平台资源 id 编译期不可校验 / 22 `output` 节点两种出参形状 / 23 `agent` 的条件必填）；§6 补内部 Python API 与平台服务依赖；决策 2 点明与 AC-01"一个只读接口"的一处读法 | 自审对照 `sdd-review/references/design-checklist.md` 的 24 项检查 |
+| 2026-11-22 | Wave 6 实现与 G8 两轮复核：前端模板只从 `/api/v1/workflow/node_templates` 取，逐项校验形状（`type` 字符串 + `group_params` 列表）后才交给画布，否则节点面板报错可重试；`getToolTree` 直接用后端 `node_template`，缺模板的工具点名提示；已知短板补"守卫不在 CI"与 Sidebar 两处既有问题 | codex 实测：形状不对的模板在拖拽回调里才炸；单引号写的副本能骗过初版守卫 |
 | 2026-11-22 | Wave 5 实现与 G8 两轮复核：决策 4 补"上次推送"作为线上独有的共同祖先；决策 7 收紧 `!include`（不得逃出声明目录）；§6.1 登记 v2 invoke 的 `node_run` 失败事件与 `last_push.json`；§6.4 命令面按实现补全（`--list-versions`、`--create` 互斥、`--input-json`、`--resume`、`--wait-timeout`、`tool register --name`） | v2 invoke 原先丢弃全部 `node_run`，失败节点只在其中（AC-32，用户 2026-11-22 选择后端放行失败事件）；`!include` 内容会随 push 上传（codex 实测私钥进请求体） |
 | 2026-11-22 | Wave 4 实现与 G8 两轮复核后修正决策 2 的缓存判据（平台不发模板版本 → CLI 版本 + 时效 + 校验和）与决策 5 的比较表（纳入 `data.id` 与 `data.type`；批注节点单列为提示）；diff 另提供 `online_only_items`，即 AC-26 要 push 展示的"线上独有内容"（线上独有节点/连线 + 本地不复现的线上参数与字段取值），与 `count()` 不同——后者也计入只在本地的新增 | 引擎 `graph_engine.init_nodes` 按 `data.id` 建图并跳过 `note`；平台的 v2 模板端点与 `/dev-toolkit/versions` 均无版本号 |
 | 2026-11-21 | G8 两轮 codex 复核后再修 §4.2(c) 与 §4.4：单键引用 `{{#histories#}}` 等在工作流里必崩（实测 `get_variable_by_str` → `IndexError`），不是"特例键"；#8 的扫描范围按引擎实际替换处定（`var_textarea` / `var_textarea_file` / `form` 类型 + 工具节点全部参数 + `output_result` 在 `type=input` 时 + `image_prompt` 与 `code_input` 里的 `ref` 变量），不扫 `code` / `report`；#9 增 `model_id` 非空（llm/agent/rag，`BishengLLM` 拒绝空值）与 `output_msg`/`message`、`code_input`/`code_output` 的形状；#12 的 case `id` 与四个条件字段必须是字符串；条件 `logic` 只认小写 `and`/`or`（引擎把其余一律当 OR）；`note` 节点整体豁免 | codex 逐条探针复现，均对照引擎源码与实测核实后才改 |

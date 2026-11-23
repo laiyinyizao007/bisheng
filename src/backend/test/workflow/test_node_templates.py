@@ -15,13 +15,17 @@
    或空串，不含界面文案（AC-03）。
 
 另有一道对照：前端源码还在时（迁移之前的前端常量尚未删除），本文件与前端字面量
-逐字比对；前端删掉那份常量之后，这条用例自动退场——那时后端就是唯一真相源。
+逐字比对；前端删掉那份常量、并改为请求后端接口之后（T042），这条用例退场——
+那时后端就是唯一真相源，黄金快照继续守着它。
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+
+import pytest
 
 from bisheng.workflow.common.node_templates import NODE_TEMPLATES, get_tool_node_template
 
@@ -31,6 +35,8 @@ GOLDEN_PATH = TEST_DIR / "fixtures" / "node_templates_golden.json"
 #: 仓库根（src/backend/test/workflow/ -> 上溯四级）
 REPO_ROOT = Path(__file__).resolve().parents[4]
 FRONTEND_TEMPLATE = REPO_ROOT / "src" / "frontend" / "platform" / "src" / "controllers" / "API" / "workflow.ts"
+#: The endpoint the frontend fetches templates from once its literal is gone (T042).
+FRONTEND_ENDPOINT = "/api/v1/workflow/node_templates"
 LOCALE_DIR = REPO_ROOT / "src" / "frontend" / "platform" / "public" / "locales"
 LOCALES = ("zh-Hans", "en-US", "ja")
 
@@ -61,14 +67,50 @@ def _locale_nodes(locale: str) -> dict:
 
 
 def _frontend_literal() -> list[dict] | None:
-    """解析前端的 ``workflowTemplate`` 字面量；文件不在（T042 已删）返回 None。
+    """解析前端的 ``workflowTemplate`` 字面量；T042 删掉它之后返回 None。
 
-    **文件在但解析不了不算"退场"**——常量被改名、移动或源码临时坏掉时，
-    这里必须让下面的对照测试红，而不是静默失去 live 对照。
+    **"退场"必须有正面证据**：常量不在了，同一文件里的 ``getWorkflowNodeTemplate``
+    必须改为请求后端接口——否则常量只是被改名、移动或删坏了，这里必须红，
+    而不是静默失去 live 对照。文件本身不在也算红（那个函数住在这个文件里）。
     """
-    if not FRONTEND_TEMPLATE.exists():
+    assert FRONTEND_TEMPLATE.exists(), f"前端模板接口文件不见了：{FRONTEND_TEMPLATE}"
+    source = FRONTEND_TEMPLATE.read_text(encoding="utf-8")
+    if not _has_template_copy(source):
+        assert _fetches_from_backend(source), (
+            "前端 workflowTemplate 常量不见了，但 getWorkflowNodeTemplate 也没改为请求"
+            f" {FRONTEND_ENDPOINT}——这条 live 对照不允许静默退场。"
+        )
         return None
-    return _parse_frontend_literal(FRONTEND_TEMPLATE.read_text(encoding="utf-8"))
+    return _parse_frontend_literal(source)
+
+
+#: A template literal in any spelling: the old constant name, or object keys named
+#: ``group_params`` in any quote style (code that *reads* nodes uses ``.group_params``).
+_TEMPLATE_COPY = re.compile(r"\bworkflowTemplate\s*=|(?:['\"`]group_params['\"`]|[{,]\s*group_params)\s*:")
+
+
+def _has_template_copy(source: str) -> bool:
+    return _TEMPLATE_COPY.search(source) is not None
+
+
+def _function_body(source: str, name: str) -> str:
+    """The text of ``export const|function|async function <name>`` up to the next top-level ``export``."""
+    match = re.search(rf"^export (?:const|function|async function) {name}\b", source, re.MULTILINE)
+    assert match, f"前端找不到 {name}——它被改名或移走了？"
+    rest = source[match.end() :]
+    following = re.search(r"^export ", rest, re.MULTILINE)
+    return rest[: following.start()] if following else rest
+
+
+def _fetches_from_backend(source: str) -> bool:
+    """``getWorkflowNodeTemplate`` itself requests the endpoint (any quote style).
+
+    Comments are not stripped: a regex stripper is not string-aware and turns ``"https://…"``
+    into a false red, while an endpoint call that only survives in a comment inside this one
+    function is a far less likely shape than a URL string.
+    """
+    body = _function_body(source, "getWorkflowNodeTemplate")
+    return re.search(rf"axios\.get\(\s*(['\"`]){re.escape(FRONTEND_ENDPOINT)}\1", body) is not None
 
 
 def _parse_frontend_literal(source: str) -> list[dict]:
@@ -183,6 +225,13 @@ def test_matches_frontend_source_when_available():
     assert NODE_TEMPLATES == frontend, "后端模板与前端常量不一致——两边必须逐字相同"
 
 
+def test_frontend_keeps_no_template_copy():
+    """T042 之后的常驻断言：前端只从后端取模板，源码里不再有任何一份副本（AC-01/AC-05）。"""
+    source = FRONTEND_TEMPLATE.read_text(encoding="utf-8")
+    assert not _has_template_copy(source), "前端模板接口文件里又出现了模板字面量"
+    assert _fetches_from_backend(source), f"getWorkflowNodeTemplate 没有请求 {FRONTEND_ENDPOINT}"
+
+
 def test_template_carries_no_ui_copy():
     """参数级文案位一律是 ``"true"`` 占位符或空串（AC-03）。"""
     offenders: list[str] = []
@@ -278,3 +327,36 @@ def test_cli_fixture_matches_backend_templates():
     从不回落到任何模板副本（AC-05）。
     """
     assert json.loads(CLI_TEMPLATE_FIXTURE.read_text(encoding="utf-8")) == NODE_TEMPLATES
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        'const workflowTemplate = [{"type": "start"}]',
+        "const workflowTemplate=[{'group_params': [], 'type': 'start'}]",
+        "const nodes = [{ group_params: [] }]",
+        'const nodes = [{"group_params": []}]',
+    ],
+)
+def test_copy_detector_recognizes_any_spelling(literal):
+    """G8 W6 R2: a copy written with single quotes or without the old spacing must not pass as "no copy"."""
+    assert _has_template_copy(literal)
+
+
+def test_copy_detector_ignores_code_that_reads_nodes():
+    assert not _has_template_copy("const { version_key } = nodeData.group_params[0].params[0].value")
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        'export const getWorkflowNodeTemplate = async () => {\n    const u = "https://x";\n    return axios.get("/api/v1/workflow/node_templates")\n}',
+        "export async function getWorkflowNodeTemplate() {\n    return axios.get('/api/v1/workflow/node_templates')\n}",
+    ],
+)
+def test_backend_fetch_detector_accepts_ordinary_refactors(declaration):
+    assert _fetches_from_backend(declaration)
+
+
+def test_backend_fetch_detector_rejects_another_endpoint():
+    assert not _fetches_from_backend('export const getWorkflowNodeTemplate = () => axios.get("/api/v1/elsewhere")')
