@@ -315,6 +315,17 @@ def _resolve_tool(
     return template
 
 
+def resolve_tool(tools: Any, reference: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """``(node_template, None)`` for a resolvable reference, else ``(None, issue)``.
+
+    The same lookup the compiler runs per tool node, for callers that need one
+    answer outside a compile (``FlowClient.tool_key``) — one resolver, not two.
+    """
+    issues: list[dict[str, Any]] = []
+    template = _resolve_tool(None, reference, _tool_catalogue(tools), issues)
+    return template, (issues[0] if issues else None)
+
+
 # ---- edges ---------------------------------------------------------------------
 
 

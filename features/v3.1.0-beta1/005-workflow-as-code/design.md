@@ -144,7 +144,7 @@
   - `GET /api/v2/flow/node_templates` —— 给 **CLI / 服务账号**（约束 2：CLI 只有服务账号密钥）。
   - 两者读**同一个** `workflow/common/node_templates.py`，不存在两份模板。
   - **⚠ 与 spec AC-01 的一处读法需要点明**：AC-01 的原话是"由后端持有并经**一个**只读接口发布……**不得在前端再保留第二份节点模板常量**"。本设计取它的**后半句（禁止第二份常量）**为硬约束——那是本 feature 存在的理由；前半句的"一个"若被读成"端点数量只能是 1"，则本设计需要让 CLI 改走 v1 JWT，而那**会推翻约束 2**（CLI 只有 `bs-sak-*`，v1 面它够不着），是明显更差的方案。**两个端点返回的是同一份数据、同一份权威，不构成"第二份"**。此处点明，供 design ★ 确认时一并裁决。
-- **CLI 的模板缓存**：CLI 把取到的模板按平台 `base_url` 缓存到项目内 `.bisheng/cache/node_templates.json`，带平台返回的版本指纹。缓存命中省一次往返；缓存缺失或过期则重新取；**取不到就失败并给出可读原因，绝不回落**（AC-05）。缓存是**性能优化，不是副本**——它存的是平台刚发下来的原文。
+- **CLI 的模板缓存**：CLI 把取到的模板按平台 `base_url` 缓存到项目内 `.bisheng/cache/node_templates.json`，~~带平台返回的版本指纹~~ **（2026-11-22 实现更正：平台不发布模板版本，改为按条目记 CLI 版本、取回时间与内容 sha256，四项成立且未超过 1 小时才命中；条目键是 `base_url` 的摘要，文件里不出现地址；缓存目录自带 `.gitignore`）**。缓存命中省一次往返；缓存缺失或过期则重新取；**取不到就失败并给出可读原因，绝不回落**（AC-05）。缓存是**性能优化，不是副本**——它存的是平台刚发下来的原文。
 - **AC-44（平台侧为声明格式的权威定义方）在本决策下的具体兑现**：
   - 节点模板（声明格式的主体）：后端是唯一权威，前端与 CLI 都从它取，**没有第二份需要同步的东西**。
   - YAML DSL 自身的键名（`nodes` / `type` / `params` / `edges` / `from` / `to` / `handle`）：本版**只有 CLI 一处实现**（§4.3 的 `flow/spec.py`），后端不读 YAML，因而没有第二份。CLI 对 YAML 的检查只到"顶层必填字段 + 可 `safe_load` + 顶层是映射"（照 `project.py` 的形状，不填默认值、不裁定节点类型合法性）。
@@ -218,9 +218,9 @@
 
   | 比较对象 | 键 | 忽略 |
   |---|---|---|
-  | 节点集合 | `node.id` | — |
+  | 节点集合 | `node.id` | 批注节点（`data.type == "note"`）：引擎跳过、DSL 也没有这种类型，单列为提示（`notes_only_online/local`），不计入差异 |
   | 节点参数 | `data.group_params[].params[].key` → `value` | `label` / `desc` / `type` / `required` / `placeholder` / `options` / `help`（这些是模板元数据，不是开发者填的值；模板整体变了由节点模板版本体现，不进 diff） |
-  | 节点其他字段 | `data.name` / `data.description` / `data.tab` / `data.tool_key` | `data.v` |
+  | 节点其他字段 | `data.id`（引擎按它建图）/ `data.type` / `data.name` / `data.description` / `data.tab` 的 `value` / `data.tool_key` | `data.v` |
   | 连线 | `(source, sourceHandle, target)` 三元组 | `id` / `animated` / `type`（`id` 是前端生成的 `xy-edge__...`，随 `sourceHandle` 变，不是独立事实） |
   | 顶层 | — | `viewport`、节点的 `position` |
 
@@ -801,5 +801,6 @@ cd src/bisheng-cli && BISHENG_CLI_RUN_NETWORK_TESTS=1 uv run pytest tests/ -m ne
 | 2026-11-20 | 决策 2 补齐 v1 + v2 两个模板端点 | 约束 2（CLI 只有服务账号密钥 ⇒ CLI 能用的后端接口必须在 v2 面） |
 | 2026-11-20 | 决策 5 明确"排除画布信息、纳入节点语义字段"的完整比较表 | 避免"只比参数值"漏掉 `tab` / `tool_key` / `name` 的真实差异 |
 | 2026-11-20 | **design 自审一轮**：新增 §2 的 Constitution Check（逐条核对 C1–C8）、§4.5 的 AC 落点索引；§4.4 补齐 12 类节点的必填参数表（原表只覆盖 input / llm，不满足 AC-15 的"某类节点"）；§5 补 3 条坑（21 平台资源 id 编译期不可校验 / 22 `output` 节点两种出参形状 / 23 `agent` 的条件必填）；§6 补内部 Python API 与平台服务依赖；决策 2 点明与 AC-01"一个只读接口"的一处读法 | 自审对照 `sdd-review/references/design-checklist.md` 的 24 项检查 |
+| 2026-11-22 | Wave 4 实现与 G8 两轮复核后修正决策 2 的缓存判据（平台不发模板版本 → CLI 版本 + 时效 + 校验和）与决策 5 的比较表（纳入 `data.id` 与 `data.type`；批注节点单列为提示）；diff 另提供 `online_only_items`，即 AC-26 要 push 展示的"线上独有内容"（线上独有节点/连线 + 本地不复现的线上参数与字段取值），与 `count()` 不同——后者也计入只在本地的新增 | 引擎 `graph_engine.init_nodes` 按 `data.id` 建图并跳过 `note`；平台的 v2 模板端点与 `/dev-toolkit/versions` 均无版本号 |
 | 2026-11-21 | G8 两轮 codex 复核后再修 §4.2(c) 与 §4.4：单键引用 `{{#histories#}}` 等在工作流里必崩（实测 `get_variable_by_str` → `IndexError`），不是"特例键"；#8 的扫描范围按引擎实际替换处定（`var_textarea` / `var_textarea_file` / `form` 类型 + 工具节点全部参数 + `output_result` 在 `type=input` 时 + `image_prompt` 与 `code_input` 里的 `ref` 变量），不扫 `code` / `report`；#9 增 `model_id` 非空（llm/agent/rag，`BishengLLM` 拒绝空值）与 `output_msg`/`message`、`code_input`/`code_output` 的形状；#12 的 case `id` 与四个条件字段必须是字符串；条件 `logic` 只认小写 `and`/`or`（引擎把其余一律当 OR）；`note` 节点整体豁免 | codex 逐条探针复现，均对照引擎源码与实测核实后才改 |
 | 2026-11-21 | Wave 3 实现对照引擎修正 §4.4：#5 进出边均可；#7 只判条件节点；#8 孤立 `{{#` 不算引用、条件变量也查；#12 case 的 `operator`/`conditions` 可选（原文写成必填的 `logic`/`conditions`）；`agent.sql_agent` 不列必填。§6.5 补齐实现中确定的键：节点 `name`/`description`/`position`、条件 `id`/`ref`/`label`、工具限定名、未知键报错 | 按原表实现会误报合法定义（AC-18）；DSL 用 invest v3 真实工作流做了零差异的编译比对 |

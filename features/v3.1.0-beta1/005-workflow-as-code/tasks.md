@@ -12,7 +12,7 @@
 | spec.md | ✅ 已评审 | 44 条 AC，EARS 句型；2026-11-20 用户确认 |
 | design.md | ✅ 已评审 | 9 条决策 + 23 条坑 + AC 落点索引；2026-11-20 用户确认 |
 | tasks.md | ✅ 已拆解 | 47 个任务，7 个 Wave；2026-11-20 `/sdd-review tasks` 通过 |
-| 实现 | 🔄 进行中 | Wave 1–2 完成，Wave 3 除 T017（挪到 Wave 5）外完成（24 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | Wave 1–2、Wave 4 完成，Wave 3 除 T017（挪到 Wave 5）外完成（28 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -247,28 +247,28 @@
 
 ### Wave 4 — CLI：客户端层与 diff
 
-- [ ] **T026**: 【测试】CLI 客户端层测试
+- [x] **T026**: 【测试】CLI 客户端层测试
   **文件**: `src/bisheng-cli/tests/test_flow_client.py`
   **逻辑**: 覆盖：模板取回与**缓存**（命中缓存不发请求、缓存失效时重取、**取不到时失败且不回落任何硬编码副本**）；工具列表取回与 `operationId → tool_key` 解析；版本读取（默认基准 = 当前版本、指定版本 = 历史版本）；**线上不存在 / 无权读取 / 读取失败三种情形分别给出可行动的原因**（不报"无差异"）；平台错误码 → `CliError` 的映射（`details` / `hints` 原样透传）；**输出里不出现凭据明文**
   **测试**: `test_templates_cached_and_invalidated` / `test_template_fetch_failure_has_no_fallback` / `test_operation_id_resolves_to_tool_key` / `test_missing_workflow_distinguished_from_forbidden` / `test_platform_error_becomes_clierror` / `test_no_credential_in_output`
   **覆盖 AC**: AC-05, AC-24, AC-28, AC-41
   **依赖**: T006, T012, T014
 
-- [ ] **T027**: 【实现】CLI 客户端层
+- [x] **T027**: 【实现】CLI 客户端层
   **文件**: `src/bisheng-cli/bisheng_cli/flow/client.py`
   **逻辑**: 用既有 `PlatformClient`（`bisheng_cli/http.py`）封装 v2 调用：取节点模板（带按 `base_url` 的本地缓存，缓存是**性能优化不是副本**，取不到就失败）、取工具列表、读版本、建版本、切当前版本、注册工具、invoke。平台错误码经 `errors.py` 翻成 `CliError`（`as_failure()` 的五元组）。**不做权限判定**
   **测试**: T026 全部通过
   **覆盖 AC**: AC-05, AC-24, AC-28, AC-41
   **依赖**: T026
 
-- [ ] **T028**: 【测试】diff 算法测试（双向探针）
+- [x] **T028**: 【测试】diff 算法测试（双向探针）
   **文件**: `src/bisheng-cli/tests/test_flow_diff.py`
   **逻辑**: **必须报出来**：线上独有节点、本地独有节点、同一节点上取值不同的参数、线上独有连线、本地独有连线。**必须不算差异**：仅 `position` 不同、仅 `viewport` 不同、仅 `data.v` 不同、仅参数的 `label` / `desc` / `type` / `required` 不同。**必须算差异**：`tab.value` 不同、`tool_key` 不同、`name` 不同。参数比较**按 key 不按位置**（加一个参数不应让其余参数全被报成"变了"）。差异项必须可定位（节点 id / 参数键 / 连线两端与句柄）
   **测试**: `test_reports_node_only_online` / `test_reports_node_only_local` / `test_reports_changed_param` / `test_reports_edge_only_online` / `test_reports_edge_only_local` / `test_position_only_is_not_a_diff` / `test_viewport_only_is_not_a_diff` / `test_node_version_only_is_not_a_diff` / `test_param_label_only_is_not_a_diff` / `test_tab_value_is_a_diff` / `test_tool_key_is_a_diff` / `test_params_compared_by_key_not_position`
   **覆盖 AC**: AC-19, AC-20, AC-21, AC-22, AC-23
   **依赖**: T023
 
-- [ ] **T029**: 【实现】diff 算法
+- [x] **T029**: 【实现】diff 算法
   **文件**: `src/bisheng-cli/bisheng_cli/flow/diff.py`
   **逻辑**: `diff(local, online) -> dict`，按 design 决策 5 的比较规则表实现：节点按 `id` 索引；参数按 `group_params[].params[].key` 展平比 `value`；节点其他字段比 `name` / `description` / `tab` / `tool_key`；连线按 `(source, sourceHandle, target)`；排除 `position` / `viewport` / `data.v` / 参数元数据。输出机器可读且**人读呈现与机器可读呈现内容一致**
   **测试**: T028 全部通过
@@ -434,3 +434,6 @@
 - **Wave 3 偏差（2026-11-21）**：① **T017 挪到 Wave 5，与 T031 同批**——T017 要求"只接通 `compile`"，但 `compile` 的实现在 T031，且依赖 Wave 4 的客户端层取模板；Wave 3 注册 `flow compile` 就是桩命令，违反上游"命令要么注册要么不存在"，T016 的 `test_no_subcommand_is_a_stub` 本身也会拦。T016 的契约测试是**对解析器参数化**的，`flow` 一注册就自动纳入，不用改测试；② **§4.4 按引擎修正四处**（论证见 design 修订历史 2026-11-21）：#5 进出边均可、#7 只判条件节点、#8 孤立 `{{#` 是正文不是引用、#12 case 的 `operator`/`conditions` 可选，另 `agent.sql_agent` 不列必填——按原表会误报合法定义（AC-18）；③ **节点类型清单不在 CLI 硬编码**：`validate(definition, templates, tools)` 从模板推出合法类型（决策 2），必填参数表与比较符集合按设计是 CLI 侧清单；④ **DSL 补键**（design §6.5 已同步）：节点 `name`/`description`/`position`，条件 `id`/`ref`/`label`，工具 `<类型名>/<operationId>` 限定名；未知键一律编译报错；⑤ **CLI 测试夹具 `tests/fixtures/flow/node_templates.json`** 是后端 `NODE_TEMPLATES` 的冻结副本（CLI 零耦合，测不到后端常量），由后端 `test_cli_fixture_matches_backend_templates` 钉在真值上；夹具只给测试用，运行时不回落（AC-05）；⑥ **验证**：T016 对现有 7 个命令参数化全绿 + 变异探针（拿掉一个叶子的镜像 → 正好那个叶子红）；T018 的"不执行"用例先证明载荷在 `unsafe_load` 下真的会执行（初版载荷连 `unsafe_load` 都解析不了，等于什么也没证明），再证明把加载器换成不安全的会变红；T025 跑 22 个变异（15 条规则静默 + 7 条设计明确不报的越界多报）全部被杀；**用 DSL 声明 invest v3 真实工作流（13 节点 / 13 连线），编译结果与 `build_v3.build()` 逐节点逐参数零差异**、校验零问题——比对中暴露并修了三处：条件 id 无法沿用（→ DSL 可写 `id`）、条件 `left_label` 与画布约定不一致（→ 按 `<节点显示名>/<变量>` 生成）、提示词里的字面量 `{{#` 被误报（→ 规则 #8 收窄）
 - **Wave 3 G8 第一轮（2026-11-21，codex，41/50）**：F1 规则 #9 对编译产物永远不报——编译器把模板默认值（`model_id: ""`）全填上了，"键存在"恒真；实测 `BishengLLM` 对空 `model_id` 抛 `NoLlmModelConfigError` → 增 `param_empty`（只针对 llm/agent/rag 的 `model_id`，空提示词是合法的空提示词，不一刀切）；F2 `cases` 里写成平台字段名（`left_var` / `comparison_operation` / `operator`）被静默忽略 → 编译出 `null` → 引擎 pydantic 报错——编译器改为拒绝未知键、要求 `left`+`op`、`value`/`ref` 互斥、`value: null` → `""`，规则 #12 要求条件 `id` 与四字段为字符串；F3 平台列表畸形 / 非字符串类型抛原始异常 → 改报 `CliError` / 问题项；F4 覆盖层可追加与已声明节点同 id 的节点 → `node_duplicated`；F5 规则 #6 补查来源节点；F6 规则 #8 扫到了引擎从不替换的 `code` / `report` 参数（误报）→ 按参数类型限定范围；F8 `note` 节点豁免、顶层未知键报错。**不采纳 F7**（条件 case 无出边）：引擎把命中的 case 路由到空列表后静默结束、不报错，"命中即停"可能是作者本意——按 AC-18 不拦；第二轮 codex 用 langgraph 实测确认这条不采纳成立
 - **Wave 3 G8 第二轮（2026-11-21，codex 深度，42/50）**：N1（High）**单键引用 `{{#histories#}}` / `{{#query#}}` / `{{#context#}}` 在工作流里必崩**——design §4.2(c) 把它们写成"特例键"是照搬 `prompt_template.py` 过时的文档字符串，我实现时没有自己验证；实测 `get_variable_by_str('histories')` → `IndexError`，已改为报 `reference_without_node`，原先把它们当合法输入的用例同步改掉；N2/N3 `output_msg`/`message` 与 `code_input`/`code_output` 的形状；N4 case `id` 非字符串；N5 `logic: AND` 会被引擎当成 OR → 只认小写 `and`/`or`；N6 模板内部畸形 → `CliError`；N7/N8/N10 规则 #8 漏扫 `output_result.value`（`type=input` 时被替换）、工具参数（引擎按名字全部替换，不看类型）、`image_prompt` 与 `code_input` 的 `ref` 变量——全部补上。**另做了随机模糊测试**（畸形结构 × 3000 次 × 20 个种子，覆盖编译 / 校验 / 覆盖层检查）：前后共找出并修掉 11 处"抛原始异常而不是报告"的位置，最终 0 次意外异常；变异探针 30+ 条全部被杀，其中一条变异因签名不匹配而"红得不对"，修正后确认红的正是那两条针对性用例
+- **Wave 4 偏差（2026-11-22）**：① **模板缓存不带"平台版本指纹"**——design 决策 2 写了"带平台返回的版本指纹"，但 v2 模板端点只回列表，`/dev-toolkit/versions` 也没有平台版本号，平台根本不发这个指纹。改为：缓存条目按归一化 `base_url` 分条，记 CLI 版本、取回时间、内容 sha256；四项都成立且未超过 `TEMPLATE_CACHE_TTL`（1 小时）才命中，其余一律回平台重取，**重取失败即失败、旧条目不升格为兜底**（AC-05）；`refresh=True` 绕过缓存。模板是后端常量、只随平台升级变化，1 小时是"升级后最久多久才被察觉"的上界；② **读失败三态落在客户端层**：平台对不存在回 404（`NotFoundError`）/ 10500（版本），对无可见权限回 403（FGA）——三态可如实区分，按场景翻成不同退出码与下一步，`details` / `hints` 原样透传；105xx 的全局退出码映射仍按计划在 T040/T041（Wave 5）；③ **diff 比较表多纳入 `data.type`**（同 id 换了节点类型），按决策 5"新增即纳入"；参数值按规范化 JSON 比较（`7`≠`"7"`、`True`≠`1`，dict 键序不计）；连线按多重集合计数；④ **人读呈现**：长值从第一处不同的字符前 40 字起截取（从头截会把真正改动的那句截掉——用 invest v3 真实提示词复现过），完整值见 `--json`；⑤ `compiler.resolve_tool` 公开化，`FlowClient.tool_key` 复用同一解析器，不另写一份；⑥ **验证**：新增测试 82 个；变异 38 条全部被杀（中途两条存活：读失败翻译后丢 `details`、单边长参数不截断——均补测试后被杀）；diff 模糊测试 20 种子 × 3000 次（3.2 万次完成比较、2.8 万次按畸形拒绝、0 次意外异常）；真实数据：DSL 编译的 invest v3 与 `build_v3.build()` diff 为一致，叠加 4 处模拟网页改动（改提示词、改名、删连线、加节点）+ 拖画布 + 改文案，正好报出 4 处
+- **Wave 4 G8 第一轮（2026-11-22，codex，40/50）**：采纳——批注节点（`data.type == "note"`，引擎跳过、DSL 无此类型）原先会被报成"线上独有节点"，改为单列提示、不计入差异；`data.id` 未比较（引擎按 `data.id` 建图，改了它 diff 却说一致）→ 纳入；`group_params: null`（`BaseNodeData` 允许）被当成平台缺陷 → 视为无参数；无信封的 404 被报成"工作流不存在" → 实为路由不存在（平台过老 / 地址错），改报 `EXIT_PLATFORM_TOO_OLD`；缓存临时文件用固定名，并发写可能装入半截文件 → `mkstemp` + 清理；10599 只在 v1 端点出现 → 从 v2 的拒绝码里删掉；工具列表的子项必须是对象。**不采纳**：未在 YAML 声明 `name`/`description` 时不比较它们——决策 5 明确纳入，push 确实会改掉线上显示名，diff 就该报（交用户复核）；10525/10529 的退出码按计划在 T040/T041 统一登记
+- **Wave 4 G8 第二轮（2026-11-22，codex 深度，39/50）**：H1 信封里 `status_code` 不是整数时 `parse_envelope` 当成功 → 一次被拒的写会被报成成功（AC-27/29），改判契约缺陷，且写操作回包逐个查形状（新版本必须有整数 `id`）；H2 非流式运行 240 s 超时被报成"平台不可达" → 单独报"这一轮运行超时"（`EXIT_WAIT_TIMEOUT`），超时可由调用方指定；**根治（流式运行、先拿到会话标识）留给 T037**；M1 运行失败另立分类（无权时说"使用"权限，不说"编辑"）；M2 增 `diff.online_only_items`，给 push 的 AC-26 判定用，不能用 `count()`；M3 NaN/Infinity 会让 `--json` 输出非法 JSON → diff 拒绝；M4 缓存键改为 `base_url` 摘要（地址里的账号密码不落盘），缓存目录自带 `.gitignore`；M5 版本号只认 ASCII 数字（`"²".isdigit()` 为真但 `int` 崩）；L1 `edges: null` 视为无连线；L3 缓存文件超 16 MB 视为未命中；L5 补 FastAPI 风格 JSON 404 的用例。**不采纳**：L4 版本列表 `total`（Wave 5 `--list-versions` 需要时再加）、L6 强制 https（既有 login 的范围，不在本 feature）。**两轮修复后**：变异 59 条全部被杀（期间 3 次锚点因重构失效，按规矩搬锚点、未删变异）；diff 模糊测试 6 万次 0 次意外异常；invest v3 真实数据对照仍为一致；CLI 全量 786 通过，失败仍为既有 6 条
