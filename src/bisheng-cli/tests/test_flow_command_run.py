@@ -74,9 +74,13 @@ def _dialog_wait(message_id: str = "38") -> dict:
         message_id=message_id,
         input_schema={
             "input_type": "dialog_input",
+            # As the platform sends it (InputNode.get_input_schema + convert_user_input_event):
+            # the text field first, then three optional attachments — one of them untyped.
             "value": [
                 {"key": "user_input", "type": "text", "required": True, "value": ""},
                 {"key": "dialog_files_content", "type": "dialog_file", "value": []},
+                {"key": "dialog_file_accept", "type": "dialog_file_accept", "value": "all"},
+                {"key": "user_input_file", "type": "", "value": True},
             ],
         },
     )
@@ -378,3 +382,13 @@ def test_user_stop_is_not_a_node_failure(spec: Path, monkeypatch: pytest.MonkeyP
     assert result(out)["ok"] is False
     assert result(out)["failure"]["details"]["node_id"] == "llm_1"
     assert "出错" not in err and "停止" in err
+
+
+def test_dialog_field_is_the_text_item_not_the_first_one(spec: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The platform checks the dialog's text key; the attachments' order must not decide what --input fills."""
+    wait = _dialog_wait()
+    items = wait["input_schema"]["value"]
+    wait["input_schema"]["value"] = items[1:] + items[:1]  # text field last
+    _, _, _, mock = _run(spec, monkeypatch, [sse(wait), sse(CLOSE)], "--input", "hi")
+
+    assert bodies(mock, "POST", INVOKE_PATH)[1]["input"] == {"input_1": {"user_input": "hi"}}

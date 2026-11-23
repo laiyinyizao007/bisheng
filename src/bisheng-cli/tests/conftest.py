@@ -2,14 +2,21 @@
 
 Three rules this file enforces for the whole package:
 
-1. **No test ever touches the network.** `no_network` swaps httpx's real
-   transport for a sentinel that raises. A forgotten mock therefore fails loudly
-   at the call site instead of quietly reaching out to whatever host the test
-   happened to name — which on a developer machine means a proxy timeout that
-   looks nothing like a missing mock.
-2. **No test ever touches the real home directory.** Credentials are written
-   with `Path.home()`; pointing that at `tmp_path` is what keeps a test run from
-   overwriting the developer's own `~/.bisheng/credentials.json`.
+1. **No test ever touches the network** — through httpx, which is the CLI's only
+   HTTP client. `no_network` swaps httpx's real transport for a sentinel that
+   raises. A forgotten mock therefore fails loudly at the call site instead of
+   quietly reaching out to whatever host the test happened to name — which on a
+   developer machine means a proxy timeout that looks nothing like a missing
+   mock. (Sockets opened by other libraries or subprocesses are not intercepted.)
+   The one exception is `@pytest.mark.network`, which only runs with
+   `BISHENG_CLI_RUN_NETWORK_TESTS=1` and must reach the platform directly: proxy
+   variables are stripped for it as well.
+2. **No test that writes credentials touches the real home directory.**
+   Credentials are written with `Path.home()`; the `home_dir` fixture points that
+   at `tmp_path`, which is what keeps a test run from overwriting the
+   developer's own `~/.bisheng/credentials.json`. `network` tests read the
+   credentials of whoever is logged in (point `HOME` / `USERPROFILE` elsewhere to
+   use a separate login).
 3. **No long key literal is ever written into a `.py` file.** `scripts/arch-guard.sh`
    RULE-7 greps for an assignment of a long string literal to a credential-looking
    name. It only emits a WARNING and does not
@@ -55,21 +62,29 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         reason="needs a real platform — 114 manual verification only (set BISHENG_CLI_RUN_NETWORK_TESTS=1)"
     )
     for item in items:
-        if "network" in item.keywords:
+        # The marker itself, not a keyword match: a package named `network` must not skip its tests.
+        if item.get_closest_marker("network") is not None:
             item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)
-def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+def no_network(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
     """Make any un-mocked HTTP call fail immediately.
 
     Also strips proxy env: a `socks5://` ALL_PROXY without `socksio` installed
     turns an entire file into collection ERRORs that read like an import
     problem, and the proxy-hint logic in `http.py` has to be exercised under a
     known-empty environment anyway.
+
+    `@pytest.mark.network` tests are the one exception to the sentinel: they
+    exist to reach a real platform, and they only run at all when
+    `BISHENG_CLI_RUN_NETWORK_TESTS=1` (see `pytest_collection_modifyitems`).
+    The proxy env is stripped for them too.
     """
     for name in _PROXY_ENV:
         monkeypatch.delenv(name, raising=False)
+    if request.node.get_closest_marker("network") is not None:
+        return
 
     def _refuse(self, request):
         raise AssertionError(f"unmocked network call: {request.method} {request.url}")

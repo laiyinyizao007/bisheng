@@ -12,7 +12,7 @@
 | spec.md | ✅ 已评审 | 44 条 AC，EARS 句型；2026-11-20 用户确认 |
 | design.md | ✅ 已评审 | 9 条决策 + 23 条坑 + AC 落点索引；2026-11-20 用户确认 |
 | tasks.md | ✅ 已拆解 | 47 个任务，7 个 Wave；2026-11-20 `/sdd-review tasks` 通过 |
-| 实现 | 🔄 进行中 | Wave 1–6 完成，T045 的浏览器手动验证待做（44 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | Wave 1–7 完成，仅剩 T045 的浏览器手动验证（46 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -403,14 +403,14 @@
 
 ### Wave 7 — 端到端与收尾
 
-- [ ] **T046**: 【测试】端到端联调（network marker）
+- [x] **T046**: 【测试】端到端联调（network marker）——2026-11-23 在隔离环境（本分支后端 + 独立 MySQL/Redis/OpenFGA/MinIO）跑通 2 个用例
   **文件**: `src/bisheng-cli/tests/test_flow_e2e.py`
   **逻辑**: 用 `BISHENG_CLI_RUN_NETWORK_TESTS=1` 才跑（默认跳过，`no_network` 哨兵不容许真跑）；对着真平台跑 `compile → diff → push → run` 全链路，断言：新版本建成、既有版本未改写、diff 结果与 push 前一致、run 能跑起来。**前置**：本机毕昇容器跑的是打进镜像的代码，改过后端代码必须先重建镜像
   **测试**: `test_compile_diff_push_run_end_to_end`
   **覆盖 AC**: AC-06, AC-19, AC-25, AC-30
   **依赖**: T041, T045
 
-- [ ] **T047**: 【实现】版本契约登记
+- [x] **T047**: 【实现】版本契约登记
   **文件**: `features/v3.1.0-beta1/release-contract.md`
   **逻辑**: 表 1 登记本特性的领域归属（节点模板后端化 + 工作流写开放面 + CLI `flow` 命令族）；表 2 说明"本版本增量未新增或修改全局业务不变量"；表 3 登记依赖；**已分配模块编码段注明"本特性沿用既有 105 段，未新增错误码"**；变更历史追加一行
   **覆盖 AC**: AC-44
@@ -443,3 +443,7 @@
 - **Wave 6 偏差（2026-11-22）**：① **T044 已在 Wave 2（`ad1aef4845`）随 scope 注册表一起交付**，三语言文案齐全，本 Wave 只补勾；② T001 的 live 对照原设计为"前端文件不在就退场"，但 T042 只删常量、文件仍在 → 改为**有正面证据才退场**（常量不在 **且** `getWorkflowNodeTemplate` 本体请求后端接口），并新增常驻断言 `test_frontend_keeps_no_template_copy`；③ `getWorkflowNodeTemplate` 除"非空列表"外**逐项校验** `type` 字符串 + `group_params` 列表（G8 第二轮：形状不对的模板会在画布拖拽回调里才炸）；失败文案用共享的 `api_errors:fallback`（带默认值，i18n 未就绪时不露键名）；④ 节点面板加载失败显示 `role=alert` 原因 + 重试按钮；`getToolTree` 缺 `node_template` 的工具不再静默消失，工具页签点名（新键 `nodeTemplatesLoadFailed` / `toolTemplatesUnavailable` / `retry`，三语言同批）；⑤ 按 `src/frontend/AGENTS.md`"谁改谁还"：触碰的 `workflow.ts` / `flowUtils.ts` 里残留的中文字面量（开发者日志与只进 console 的拒绝原因）改英文，`eslint-suppressions.json` 只减（Chinese-literal 24+4 条清零，Sidebar no-unused-vars 7→6）；Sidebar 里 `['时间','计算器','代码执行器']` 是按数据里的预置工具名过滤、不是界面文案，未动；⑥ 工具节点输出参数 `label` 由前端的 `输出变量` 变为后端的 `output`：画布按 i18n 键 `node.tool.output.label` 渲染标题（三语言都有），用户看不到 `output`（G8 两轮均复核）；⑦ **验证**：platform vitest 改前 41 条失败 / 改后 40 条（一条无关用例转绿，疑似不稳定），**无新增失败**；新增前端测试 19 个 + 后端守卫 9 个；变异 14 条全部被杀；后端模板与被删字面量逐项深相等、顺序与 `v` 一致（codex 复核）
 - **Wave 6 G8 第一轮（2026-11-22，codex，43/50）**：采纳——守卫只按整串匹配（换引号即误红、留在注释里即误绿）→ 限定在函数体内、容忍引号；缺模板工具只进 console → 工具页签点名；开发者文本直达用户 → 共享兜底文案；加重试按钮；文案改写（不用"节点库"这一新词）。**不采纳**：知识库快捷建流复用查询缓存（一次性动作，取新的更对）；返回值类型化（消费方都是 `@ts-strict-ignore` 遗留文件）；翻译遗留中文注释（超出本 Wave）
 - **Wave 6 G8 第二轮（2026-11-22，codex 深度，41/50）**：采纳——M1 单引号 / 无空格写的副本能骗过"不留副本"守卫（codex 用真实辅助函数实测）→ 前后端检测都改为任意引号、不依赖空格，并各自补检测器自身的正反用例；L3 守卫对 `export async function` 与先出现 `"https://…"` 字符串的写法误红 → 接受两种声明、去掉不识字符串的注释剥离；L4 形状不对的模板在拖拽回调里才炸 → 逐项校验；L5 i18n 未就绪时露出键名 → 默认值 + 显式兜底（实测未初始化的 i18next 连 `defaultValue` 都不返回）。**未处理并登记为已知短板**：M2 守卫与 platform vitest 不在任何 CI（需用户决定是否接入）；L6 / L7 Sidebar 两处既有问题。复核确认：无回归（模板与旧字面量深相等）、拉取不会改到编辑中的节点（三条建节点路径都深拷贝）、无 XSS（插值落在 React 文本节点）
+- **Wave 7 进展（2026-11-22）**：① T047 已在 `release-contract.md` 登记表 1（节点模板归属、v2 写入面、CLI 命令族与项目内绑定）、表 2（写入约束沿用开放平台身份规则）、表 3（F005 的依赖）、编码段（沿用 105 段、未新增错误码）与变更历史；② T046 的测试 `test_compile_diff_push_run_end_to_end` 已写，覆盖 compile → push --create → diff 一致 → 改 YAML 后 diff 恰为一个参数 → push 新版本且旧版本 data 逐字不变 → run 停在输入节点、带输入续跑到结束并见到声明的输出；`conftest.no_network` 对 `network` 标记的用例放行哨兵（仍清代理环境变量），这类用例只在 `BISHENG_CLI_RUN_NETWORK_TESTS=1` 时才收集运行；③ **T046 未跑**：本机毕昇运行的是官方 `v3.0.0-beta5` 镜像、与 invest 研究工作流共用同一套 MySQL——换成本分支后端要重建镜像并可能迁移共享库，属难以回退的操作，待用户决定（另起隔离环境 / 在现有环境替换 / 暂缓）；同时需要一把带 `workflow:read` `workflow:write` `workflow:invoke` 的服务账号密钥 → **用户选定另起隔离环境（见下条）**
+- **Wave 7 T046 实跑（2026-11-23，隔离环境）**：基础设施用独立 compose 项目 `bisheng-e2e`（MySQL / Redis / OpenFGA / MinIO，各自数据卷，端口只绑 127.0.0.1 且错开），本分支后端 API 与 worker 直接从 `src/backend/.venv` 起（`alembic upgrade head` 到 `v310b1_f004_workflow_soft_delete`），配置里打开 `open_platform.enabled`；首个用户注册为管理员 → 建服务账号 → 签发带三个权限位的密钥，**密钥只经管道送进 `bisheng login --api-key-stdin`，未打印、未落盘**；CLI 凭据写在隔离的 HOME，不碰本机 `~/.bisheng`。现有毕昇与 invest 研究工作流全程未动。**结果**：`test_compile_diff_push_run_end_to_end`、`test_registered_tool_failure_names_the_node` 两个用例通过。**实跑抓到一个单测漏掉的缺陷**（G8 第一轮 High，codex 读代码先指出）：平台的对话输入事件除文本字段外还附带三项可选附件，其中 `user_input_file` 没有类型，CLI 把它当成第二个待填字段 → 对任何对话输入节点 `--input` 都被拒（EXIT_USAGE）。修正为"非表单输入只取第一项"（平台校验也只认 `input_schema.key`），单测夹具改成与平台实发事件一致；撤掉修正后端到端用例变红、恢复后变绿（见证有效）。另：失败节点用例让后端 Wave 5 放行的失败事件在真实平台上走了一遍（工具指向无人监听的 127.0.0.1:9）
+- **Wave 7 G8 第一轮（2026-11-23，codex，35/50）**：采纳——H1 对话输入多算字段（见上）；M2 端到端用例宣称覆盖 AC-30..33 但未断言续跑凭据里的会话与消息标识、AC-32 未覆盖 → 解码凭据逐项断言，新增工具失败用例；M3 / L5 conftest 文档改为如实描述（哨兵只拦 httpx；写凭据的用例才隔离 HOME）；L4 network 用例也清代理变量——保留并写明"平台须直连可达"。L6 残留 `probe_*.py` 与 `uv.lock` 仍待用户决定，不入提交
+- **Wave 7 G8 第二轮（2026-11-23，codex 深度，40/50）**：第一轮修复全部复核通过。采纳——M1 conftest 的跳过判据按名字匹配（`network` 包里的用例会被无条件跳过）→ 改用标记本身；M2 端到端用例的工作流 / 工具类型名按秒命名、平台按归属人判重 → 加随机后缀；L5 对话字段按位置取 → 优先取 `type == "text"` 的那一项（补顺序被打乱的单测）；L6 夹具里 `user_input_file` 的类型改为平台实发的空串；L9 未登录改为跳过并给出登录指引，退出码断言改用 `EXIT_PRECHECK_FAILED`。M4（tasks.md 仍写"未跑"）在复核期间已更新。**不采纳**：M3 未跟踪的 `probe_*.py` 会让 CI 的 ruff 变红——CI 检出的是提交内容，未跟踪文件不在其中（本地全量 ruff 会受影响，删除仍待用户决定）；L7 `--input-json` 本地校验键集（平台 10543 已给出明确原因）。**待用户决定**：L8 `uv.lock`——HEAD 里的锁文件与 pyproject 不一致（`uv lock --check` 在 HEAD 即失败），工作区里那处改动正是同步修复。修复后：CLI 全量 913 通过（失败仍为既有 6 条），隔离环境端到端再跑 2 个用例通过；隔离环境已按用户选择拆除（容器、网络、两个数据卷），现有毕昇 11 个容器未受影响

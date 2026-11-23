@@ -60,8 +60,10 @@ STOPPED_BY_USER = "stop by user"
 
 #: Events after which the run waits for the caller (``RedisCallback._INPUT_CATEGORIES``).
 WAITING_EVENTS = frozenset({"input", "output_with_input_msg", "output_with_choose_msg"})
-#: Input fields a terminal cannot fill: dialog file uploads.
-_FILE_FIELDS = frozenset({"dialog_file", "dialog_file_accept"})
+#: The one input type whose items are all fields to fill; every other pause has exactly one
+#: (a dialog input sends its text field first, then optional attachments such as
+#: ``user_input_file`` — untyped — and the file pickers; the platform requires only the first).
+_FORM_INPUT = "form_input"
 _RESUME_PREFIX = "r1."
 
 #: What ``POST /api/v2/tools`` accepts (``OpenToolTypeCreate`` / ``OpenToolCreate``, both ``extra="forbid"``).
@@ -592,10 +594,14 @@ def _pause(events: list[dict[str, Any]]) -> dict[str, Any] | None:
 def _fields(pause: dict[str, Any]) -> list[dict[str, Any]]:
     schema = pause.get("input_schema") if isinstance(pause.get("input_schema"), dict) else {}
     items = schema.get("value") if isinstance(schema.get("value"), list) else []
+    keyed = [item for item in items if isinstance(item, dict) and isinstance(item.get("key"), str)]
+    if schema.get("input_type") != _FORM_INPUT:
+        # One field: the text item the platform keys the input on (sent first today; picked
+        # by type so the attachments' order never decides what --input fills).
+        text = [item for item in keyed if item.get("type") == "text"]
+        keyed = (text or keyed)[:1]
     fields = []
-    for item in items:
-        if not isinstance(item, dict) or not isinstance(item.get("key"), str) or item.get("type") in _FILE_FIELDS:
-            continue
+    for item in keyed:
         fields.append(
             {
                 "key": item["key"],
