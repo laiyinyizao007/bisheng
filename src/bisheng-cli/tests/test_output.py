@@ -159,3 +159,12 @@ def test_format_schema_change_flags_breaking_items_and_keeps_unknown_ops() -> No
 @pytest.mark.parametrize("text", ["nothing to mask", ""])
 def test_mask_is_identity_on_clean_text(text: str) -> None:
     assert mask(text) == text
+
+
+def test_mask_covers_common_model_keys() -> None:
+    """Online prompt values reach the terminal through `flow diff`; a pasted model key must not."""
+    key = "sk-" + "proj-" + "A1b2C3d4E5f6G7h8I9j0K1l2"
+    text = mask(f"system_prompt 线上取值 用 {key} 调用")
+    assert key not in text and "sk-****" in text
+    # Short or ordinary words that merely start with "sk-" are left alone.
+    assert mask("sk-learn 与 task-sk-1") == "sk-learn 与 task-sk-1"

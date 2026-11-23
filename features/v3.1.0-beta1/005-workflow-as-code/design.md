@@ -202,6 +202,7 @@
   - 交互式：列出这些内容并要求确认；
   - **无 TTY：拒绝**，要求显式带上 `--allow-drop-online-only`（沿用 `cli.py` 的 `confirm()` 形状：`assume_yes` 为假且非 TTY 时抛 `CliError(EXIT_USAGE)`，而不是默认同意）。
   - 这些内容**保留在旧版本里**（旧版本的 `data` 一字不改），只是不再出现在新版本里、也不再被当前版本引用。
+  - **（2026-11-22 实现补充）以"本检出上次推送的定义"为共同祖先**：`online_only_items` 把"线上取值 ≠ 本地取值"一律算作线上独有，于是**每次改了 YAML 参数再推都会要求确认**，agent 只能永远带 `--allow-drop-online-only`，确认就失去意义。因此 push 成功切换后把推送的定义记在 `.bisheng/cache/last_push.json`（随缓存目录自带的 `.gitignore` 不进 git）；下次 push 时若线上当前版本与该记录**语义全等**（同一 diff 判据），说明网页上没人改过，差异全是 YAML 自己的旧值 → 免确认；否则（或没有记录）照旧要求确认。记录只在"与线上全等"时才被采信，损坏或过期只会导致多问一次；刻意伪造成与线上全等等价于带 `--allow-drop-online-only`，本地用户不是信任边界。免确认时结果里照常报出被替换的条数，另以 `online_only_confirmation: unchanged_since_last_push` 区分于 `confirmed`。
 - **何时该重新考虑**：若平台将来允许"上线状态下切当前版本"，则 AC-27 的拒绝语义需要重写；本 feature 的 push 逻辑（先建后切）不变。
 
 ### 决策 5：diff 排除画布信息，但纳入节点语义字段
@@ -269,7 +270,7 @@
 - **`!include` 的边界**：
   - 路径相对**声明文件所在目录**解析（不是相对 CWD——否则换个目录跑就找不到文件）；
   - 只读文本文件，不做任何模板求值；
-  - 路径逃出项目目录**不禁止**（用户自己的工作流，读自己的文件），但**不跟随符号链接去读系统文件**这条我们也不额外设防——设防等于假装这是沙箱。真正的边界是：**读文件，不是执行文件**；
+  - ~~路径逃出项目目录**不禁止**（用户自己的工作流，读自己的文件），但**不跟随符号链接去读系统文件**这条我们也不额外设防——设防等于假装这是沙箱。真正的边界是：**读文件，不是执行文件**；~~ **（2026-11-22 Wave 5 G8 第二轮更正）解析后的路径必须落在声明文件所在目录树内，否则拒绝**。原判断漏了一点：被引入的文本会编进定义、随 `push` **发往平台**——来自仓库 / PR 的声明写一行 `!include ~/.ssh/id_rsa`，私钥就进了版本数据（codex 实测）。这不是沙箱，是"别把仓库外的文件上传"；符号链接按 `resolve()` 后的真实路径判；
   - 缺失文件 → 编译期报错，指出是哪个引用、解析成了哪个绝对路径。
 - **何时该重新考虑**：若 YAML DSL 将来要支持"值来自环境变量"这类非文件来源，`!include` 会扩展成一对标签（`!include` / `!env`），届时要重新审一遍"读什么"的边界。
 
@@ -564,7 +565,9 @@ GET  /api/v2/tools                                        → 列出（含 node_
 | `POST /api/v2/tools/schema` | HTTP API（v2，`workflow:write`） | CLI `flow tool register` |
 | 工具列表响应中每个 child 的 `node_template` 字段 | 响应体增量字段 | 前端 `getToolTree`、CLI `flow compile` |
 | `bisheng flow {compile,diff,push,run,tool}` | CLI 命令 | 本地 agent、开发者 |
-| `.bisheng/flow.json`（项目内本地状态，形状照 `.bisheng/app.json`） | 文件 | CLI 自身；进 git；结构上排除出上传包 |
+| `.bisheng/flow.json`（项目内本地状态，形状照 `.bisheng/app.json`） | 文件 | CLI 自身；进 git；结构上排除出上传包。**（2026-11-22）位于声明文件旁**（不随 CWD 变），按归一化平台地址 → 声明文件名 → `{flow_id, name?, updated_at}`；只存标识；原子替换写入 |
+| `.bisheng/cache/last_push.json`（2026-11-22 新增） | 文件 | CLI 自身；不进 git（缓存目录自带 `.gitignore`）；push 判"线上独有"的共同祖先（决策 4） |
+| `POST /api/v2/workflow/invoke` 事件流里的 `node_run` 失败事件（2026-11-22 新增） | 既有 v2 端点的事件增量 | CLI `flow run` 报失败节点（AC-32）。此前 v2 丢弃全部 `node_run`；现仅放行**带 `reason` 的结束事件**，`node_id`/`node_name`/`node_execution_id` + `output_schema.message = reason`，**不带**节点输入与日志；成功的运行事件流不变。`reason` 与收尾错误事件 `data.exception` 里早已下发的是同一段文本，不新增暴露面 |
 | `bisheng.workflow.common.node_templates.NODE_TEMPLATES` | 内部 Python API（12 类节点模板的权威常量） | 后端自身的测试、前端契约对照 |
 | `bisheng.workflow.common.node_templates.get_tool_node_template(tool_info)` | 内部 Python API（由工具信息生成工具节点模板） | v1 / v2 工具列表端点 |
 
@@ -616,16 +619,18 @@ GET  /api/v2/tools                                        → 列出（含 node_
 ### 6.4 CLI 命令面
 
 ```
-bisheng flow compile <spec.yaml> [--overlay overlay.py] [--json] [--out FILE]
-bisheng flow diff    <spec.yaml> [--flow-id ID | --version-id ID] [--json]
-bisheng flow push    <spec.yaml> [--flow-id ID] [--name NAME] [--allow-drop-online-only]
-                            [--no-activate] [--create] [--json]
-bisheng flow run     <spec.yaml> [--input TEXT | --input-file FILE] [--json]
-bisheng flow tool    register <openapi.yaml> [--json]
+bisheng flow compile <spec.yaml> [--overlay overlay.py] [--out FILE] [--json]
+bisheng flow diff    <spec.yaml> [--overlay overlay.py] [--flow-id ID] [--version-id ID | --list-versions] [--json]
+bisheng flow push    <spec.yaml> [--overlay overlay.py] [--flow-id ID | --create] [--name NAME] [--description TEXT]
+                            [--allow-drop-online-only] [--no-activate] [--json]
+bisheng flow run     <spec.yaml> [--flow-id ID] [--input TEXT | --input-file FILE | --input-json OBJ]
+                            [--resume TOKEN] [--wait-timeout SECONDS] [--json]
+bisheng flow tool    register <openapi.yaml> [--name NAME] [--json]
 bisheng flow tool    list [--json]
 ```
 
 - `--flow-id` 缺省时从项目内 `.bisheng/flow.json` 读（形状照 `project.py` 的 `.bisheng/app.json`）。
+- **（2026-11-22 实现补充）**：`compile` 不带 `--out` 时定义打到 stdout（`--json` 下改放进 `result.data.definition`）；`diff --list-versions` 只列版本、不编译；`push` 与线上全等时不建版本（`pushed: false`），默认版本名 `cli-<时间>-<4 位随机>`；`run` 走**流式** invoke（会话标识随第一个事件到达，长轮次也能续跑；`--wait-timeout` 是"等下一个事件"的上限），停在等待输入且无人值守时以 exit 0 结束并给出续跑凭据 `--resume r1.<…>`（含工作流 / 会话 / 等待消息 / 节点 / 字段名），单字段用 `--input`、表单多字段用 `--input-json`；一轮既无 `close` 也未停在等待输入 → `EXIT_DEFECT`（不报"运行完成"）；用户在平台上停止 → `EXIT_CANCELLED`；节点失败 → `EXIT_PRECHECK_FAILED` 并报节点与原因。`tool register` 把解析草稿按注册端点允许的键裁剪、去掉空值后提交（注册端点 `extra="forbid"`）。
 - **全局 flag 必须镜像到每个叶子**（`cli.py` 的 `_add_global_flags(parser, mirror=True)`，用 `default=argparse.SUPPRESS`）。`flow` 是**两 token 命令**（`flow` + 动词），照 `skills` / `platforms` 的形状：`flow` 自己的 subparser 携带动词，每个动词叶子再镜像一遍全局 flag——`bisheng flow push --json` 与 `bisheng --json flow push` 两种顺序都要能跑。
 - **每条退出路径恰好一个 `result` 事件**（`main.py` 的不变量）。
 - `--json` 时 NDJSON 走 stdout、人读文本走 stderr（`output.py` 的既定分工）；最后一行恒为 `result` 事件。
@@ -801,6 +806,7 @@ cd src/bisheng-cli && BISHENG_CLI_RUN_NETWORK_TESTS=1 uv run pytest tests/ -m ne
 | 2026-11-20 | 决策 2 补齐 v1 + v2 两个模板端点 | 约束 2（CLI 只有服务账号密钥 ⇒ CLI 能用的后端接口必须在 v2 面） |
 | 2026-11-20 | 决策 5 明确"排除画布信息、纳入节点语义字段"的完整比较表 | 避免"只比参数值"漏掉 `tab` / `tool_key` / `name` 的真实差异 |
 | 2026-11-20 | **design 自审一轮**：新增 §2 的 Constitution Check（逐条核对 C1–C8）、§4.5 的 AC 落点索引；§4.4 补齐 12 类节点的必填参数表（原表只覆盖 input / llm，不满足 AC-15 的"某类节点"）；§5 补 3 条坑（21 平台资源 id 编译期不可校验 / 22 `output` 节点两种出参形状 / 23 `agent` 的条件必填）；§6 补内部 Python API 与平台服务依赖；决策 2 点明与 AC-01"一个只读接口"的一处读法 | 自审对照 `sdd-review/references/design-checklist.md` 的 24 项检查 |
+| 2026-11-22 | Wave 5 实现与 G8 两轮复核：决策 4 补"上次推送"作为线上独有的共同祖先；决策 7 收紧 `!include`（不得逃出声明目录）；§6.1 登记 v2 invoke 的 `node_run` 失败事件与 `last_push.json`；§6.4 命令面按实现补全（`--list-versions`、`--create` 互斥、`--input-json`、`--resume`、`--wait-timeout`、`tool register --name`） | v2 invoke 原先丢弃全部 `node_run`，失败节点只在其中（AC-32，用户 2026-11-22 选择后端放行失败事件）；`!include` 内容会随 push 上传（codex 实测私钥进请求体） |
 | 2026-11-22 | Wave 4 实现与 G8 两轮复核后修正决策 2 的缓存判据（平台不发模板版本 → CLI 版本 + 时效 + 校验和）与决策 5 的比较表（纳入 `data.id` 与 `data.type`；批注节点单列为提示）；diff 另提供 `online_only_items`，即 AC-26 要 push 展示的"线上独有内容"（线上独有节点/连线 + 本地不复现的线上参数与字段取值），与 `count()` 不同——后者也计入只在本地的新增 | 引擎 `graph_engine.init_nodes` 按 `data.id` 建图并跳过 `note`；平台的 v2 模板端点与 `/dev-toolkit/versions` 均无版本号 |
 | 2026-11-21 | G8 两轮 codex 复核后再修 §4.2(c) 与 §4.4：单键引用 `{{#histories#}}` 等在工作流里必崩（实测 `get_variable_by_str` → `IndexError`），不是"特例键"；#8 的扫描范围按引擎实际替换处定（`var_textarea` / `var_textarea_file` / `form` 类型 + 工具节点全部参数 + `output_result` 在 `type=input` 时 + `image_prompt` 与 `code_input` 里的 `ref` 变量），不扫 `code` / `report`；#9 增 `model_id` 非空（llm/agent/rag，`BishengLLM` 拒绝空值）与 `output_msg`/`message`、`code_input`/`code_output` 的形状；#12 的 case `id` 与四个条件字段必须是字符串；条件 `logic` 只认小写 `and`/`or`（引擎把其余一律当 OR）；`note` 节点整体豁免 | codex 逐条探针复现，均对照引擎源码与实测核实后才改 |
 | 2026-11-21 | Wave 3 实现对照引擎修正 §4.4：#5 进出边均可；#7 只判条件节点；#8 孤立 `{{#` 不算引用、条件变量也查；#12 case 的 `operator`/`conditions` 可选（原文写成必填的 `logic`/`conditions`）；`agent.sql_agent` 不列必填。§6.5 补齐实现中确定的键：节点 `name`/`description`/`position`、条件 `id`/`ref`/`label`、工具限定名、未知键报错 | 按原表实现会误报合法定义（AC-18）；DSL 用 invest v3 真实工作流做了零差异的编译比对 |

@@ -52,6 +52,7 @@ from bisheng_cli.errors import (
     EXIT_FORBIDDEN,
     EXIT_LOCAL_INVALID,
     EXIT_PLATFORM_TOO_OLD,
+    EXIT_UNREACHABLE,
     EXIT_USAGE,
     EXIT_WAIT_TIMEOUT,
     CliError,
@@ -82,6 +83,13 @@ _MISSING_CODES = frozenset({404, 10500})
 #: keeps its own next step, which names the scope.
 _DENIED_CODES = frozenset({403})
 _SCOPE_MISSING = 26003
+#: The platform's refusals for a key whose resource owner cannot act
+#: (``open_endpoints/domain/utils.py``). They arrive as plain HTTP 404 / 500
+#: envelopes, told apart from "no such workflow" only by their message — so they
+#: are matched exactly and checked before the 404 is read as "missing" (AC-43).
+_OWNER_MISSING_MESSAGES = frozenset(
+    {"Open API resource owner is unavailable", "Open API execution has no compatible resource owner"}
+)
 
 
 class FlowClient:
@@ -287,7 +295,11 @@ class FlowClient:
     def create_flow(self, name: str, data: dict[str, Any], *, description: str | None = None) -> dict[str, Any]:
         body = _body(name=name, description=description, data=data)
         row = self._write("POST", FLOWS_PATH, f"工作流 {name}", json=body)
-        return _require_row(row, "id", str, f"新建工作流 {name} 的响应")
+        row = _require_row(row, "id", str, f"新建工作流 {name} 的响应")
+        # The platform creates the first version with the workflow and returns its id;
+        # without it nothing confirms the definition landed as the current version.
+        _require_row(row, "version_id", int, f"新建工作流 {row['id']} 的响应（缺当前版本）")
+        return row
 
     def create_version(
         self, flow_id: str, name: str, data: dict[str, Any], *, description: str | None = None
@@ -319,14 +331,18 @@ class FlowClient:
         message_id: int | None = None,
         inputs: dict[str, Any] | None = None,
         read_timeout: float | None = None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        """``POST /api/v2/workflow/invoke``, non-streaming: one round to the next pause or the end.
+        """``POST /api/v2/workflow/invoke``, streamed: one round, to the next pause or the end.
 
-        Non-streaming means the platform answers only when the round is over, and
-        ``session_id`` comes with that answer — a round that outlives
-        ``read_timeout`` cannot be continued. That is reported as a timeout of
-        *this round* (the platform may still be running it), never as "the
-        platform is unreachable".
+        Returns ``{"session_id", "events"}``; ``on_event`` sees each event as it
+        arrives. Streaming is what makes a long round continuable: the session id
+        rides on every event, so it is known from the first one — the
+        non-streaming reply carried it only once the whole round was over, and a
+        round that outlived the read timeout was lost. ``read_timeout`` is the
+        longest wait for the *next* event. Running out of it is a timeout of this
+        round (the platform may still be executing it) that names the session,
+        never "the platform is unreachable".
 
         A continuation carries **both** ``session_id`` and ``message_id`` — the
         message being the one that is waiting for input. Half of the pair is
@@ -339,19 +355,48 @@ class FlowClient:
                 next_step="首次运行两者都不带；续跑时用上一轮返回的 session_id 与停住那条消息的 message_id。",
             )
         wid = _flow_id(workflow_id)
-        body: dict[str, Any] = {"workflow_id": wid, "stream": False}
+        body: dict[str, Any] = {"workflow_id": wid, "stream": True}
         if session_id is not None:
             body.update(session_id=session_id, message_id=message_id)
         if inputs is not None:
             body["input"] = inputs
         timeout = read_timeout if read_timeout is not None else INVOKE_READ_TIMEOUT
+        round_: dict[str, Any] = {"session_id": session_id, "events": []}
         try:
-            data = self._call("POST", INVOKE_PATH, json=body, read_timeout=timeout)
+            with self._platform.stream("POST", INVOKE_PATH, json=body, read_timeout=timeout) as resp:
+                if "text/event-stream" not in resp.headers.get("content-type", ""):
+                    # A refusal (or a platform that ignored ``stream``) is an ordinary envelope.
+                    resp.read()
+                    data = self._check(resp, "POST", INVOKE_PATH)
+                    if not isinstance(data, dict) or not isinstance(data.get("events"), list):
+                        raise _shape_error(f"工作流 {wid} 的运行结果")
+                    round_["session_id"] = data.get("session_id") or session_id
+                    _deliver(data.get("events") or [], round_, on_event, wid)
+                    return round_
+                for line in resp.iter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    try:
+                        frame = json.loads(line[len("data:") :].strip())
+                    except ValueError:
+                        raise _shape_error(f"工作流 {wid} 的运行事件") from None
+                    if not isinstance(frame, dict):
+                        raise _shape_error(f"工作流 {wid} 的运行事件")
+                    round_["session_id"] = frame.get("session_id") or round_["session_id"]
+                    payload = frame.get("data")
+                    _deliver(payload if isinstance(payload, list) else [payload], round_, on_event, wid)
         except CliError as err:
             raise _run_failure(err, wid, timeout) from err
-        if not isinstance(data, dict):
-            raise _shape_error(f"工作流 {wid} 的运行结果")
-        return data
+        except httpx.TimeoutException:
+            raise _stalled(wid, timeout, round_["session_id"]) from None
+        except httpx.HTTPError as exc:
+            raise CliError(
+                f"运行工作流 {wid} 时与平台的连接中断（{exc.__class__.__name__}）",
+                exit_code=EXIT_UNREACHABLE,
+                next_step="工作流可能仍在平台上执行；稍后在平台上查看这次会话，或重新运行。",
+                details={"session_id": round_["session_id"]},
+            ) from None
+        return round_
 
     # ---- plumbing ----------------------------------------------------------------
 
@@ -363,7 +408,9 @@ class FlowClient:
         that predates these endpoints, or a base URL pointing somewhere else. Those
         are not "check your workflow id", so they must not read like it.
         """
-        resp = self._platform.request(method, path, **kwargs)
+        return self._check(self._platform.request(method, path, **kwargs), method, path)
+
+    def _check(self, resp: httpx.Response, method: str, path: str) -> Any:
         envelope = _envelope(resp)
         if envelope is not None and (
             isinstance(envelope["status_code"], bool) or not isinstance(envelope["status_code"], int)
@@ -434,6 +481,11 @@ def _version_id(raw: Any) -> int:
             next_step="用 bisheng flow diff --list-versions 查看可用的版本 id。",
         )
     return int(text)
+
+
+#: Public spellings for the command layer, which records ids in the binding and in output.
+parse_flow_id = _flow_id
+parse_version_id = _version_id
 
 
 def _cache_key(base_url: str) -> str:
@@ -511,17 +563,44 @@ def _envelope(resp: Any) -> dict[str, Any] | None:
     return body if isinstance(body, dict) and "status_code" in body else None
 
 
+def _deliver(
+    events: list[Any], round_: dict[str, Any], on_event: Callable[[dict[str, Any]], None] | None, wid: str
+) -> None:
+    for event in events:
+        if not isinstance(event, dict) or not isinstance(event.get("event"), str):
+            raise _shape_error(f"工作流 {wid} 的运行事件")
+        round_["events"].append(event)
+        if on_event is not None:
+            on_event(event)
+
+
+def _stalled(wid: str, timeout: float, session_id: str | None) -> CliError:
+    where = f"（会话 {session_id}）" if session_id else ""
+    return CliError(
+        f"运行工作流 {wid} 超时：{timeout:g} 秒内平台没有发来新的事件{where}，工作流可能仍在平台上执行",
+        exit_code=EXIT_WAIT_TIMEOUT,
+        next_step="单个节点执行得久时用 --wait-timeout 调大等待；也可以先到平台上查看这次会话的结果。",
+        details={"session_id": session_id},
+    )
+
+
+def _owner_missing(err: CliError) -> CliError:
+    return _carry(
+        err,
+        "这把密钥没有可用的资源归属人，平台拒绝以它的名义读写或运行工作流",
+        EXIT_FORBIDDEN,
+        "请平台管理员为该服务账号设置一位仍然有效的资源归属人（或改用有归属人的密钥）；工作流本身没有问题，不要重新新建。",
+    )
+
+
 def _run_failure(err: CliError, wid: str, timeout: float) -> CliError:
     """Invoke's own taxonomy: running needs the ``use`` permission, and a timeout is not "unreachable"."""
     if isinstance(err.__context__, httpx.TimeoutException) and not isinstance(err.__context__, httpx.ConnectTimeout):
-        return CliError(
-            f"运行工作流 {wid} 超时：平台在 {timeout:g} 秒内没有返回这一轮的结果（工作流可能仍在平台上执行）",
-            exit_code=EXIT_WAIT_TIMEOUT,
-            next_step="非流式运行要等到下一次等待输入或运行结束才返回，会话标识也随之返回——这一轮无法续跑。"
-            "调大超时后重跑，或缩短单轮执行。",
-        )
+        return _stalled(wid, timeout, None)
     if err.exit_code == EXIT_PLATFORM_TOO_OLD:
         return err
+    if err.platform_message in _OWNER_MISSING_MESSAGES:
+        return _owner_missing(err)
     if err.code in _MISSING_CODES:
         return _carry(
             err,
@@ -544,6 +623,8 @@ def _run_failure(err: CliError, wid: str, timeout: float) -> CliError:
 def _read_failure(err: CliError, what: str) -> CliError:
     if err.exit_code == EXIT_PLATFORM_TOO_OLD:
         return err
+    if err.platform_message in _OWNER_MISSING_MESSAGES:
+        return _owner_missing(err)
     if err.code in _MISSING_CODES:
         return _carry(
             err,
@@ -571,6 +652,8 @@ def _read_failure(err: CliError, what: str) -> CliError:
 def _write_failure(err: CliError, what: str) -> CliError:
     if err.exit_code == EXIT_PLATFORM_TOO_OLD:
         return err
+    if err.platform_message in _OWNER_MISSING_MESSAGES:
+        return _owner_missing(err)
     if err.code in _MISSING_CODES:
         return _carry(
             err,

@@ -326,12 +326,16 @@ def test_bare_404_is_a_missing_route_not_a_missing_workflow(call: str, bare: htt
     assert "接口" in caught.value.message
 
 
-def test_v1_only_code_is_not_translated() -> None:
-    """10599 is raised on v1 endpoints only; on this face it would be an unknown code, left untranslated."""
+def test_v1_only_code_keeps_the_global_translation() -> None:
+    """10599 is raised on v1 endpoints only, so the client adds no flow-specific wording.
+
+    It still reads as "no write permission" through the global table (T041).
+    """
     mock = PlatformMock().post(VERSIONS_PATH, v2_error(10599, "no write", http_status=200))
     with pytest.raises(CliError) as caught:
         _client(mock).create_version(FLOW_ID, "v", _definition())
     assert caught.value.code == 10599
+    assert caught.value.exit_code == EXIT_FORBIDDEN
     assert "无权修改" not in caught.value.message
 
 
@@ -393,6 +397,8 @@ def test_envelope_without_int_verdict_is_never_success(status) -> None:
         ("create_version", {"id": "43", "name": "v"}),
         ("create_version", {"id": True, "name": "v"}),
         ("create_flow", {"name": "x"}),
+        # the platform returns the new workflow with its current version (FlowService.create_workflow)
+        ("create_flow", {"id": FLOW_ID, "name": "x"}),
         ("parse_tool_schema", [1]),
         ("register_tool", None),
     ],
@@ -436,13 +442,13 @@ def test_invoke_timeout_is_passed_to_the_request(monkeypatch: pytest.MonkeyPatch
     seen: list = []
     mock = PlatformMock().post("/api/v2/workflow/invoke", v2_ok({"session_id": "s", "events": []}))
     client = _client(mock)
-    real = client._platform.request
+    real = client._platform.stream
 
     def spy(method, path, **kwargs):
         seen.append(kwargs.get("read_timeout"))
         return real(method, path, **kwargs)
 
-    monkeypatch.setattr(client._platform, "request", spy)
+    monkeypatch.setattr(client._platform, "stream", spy)
     client.invoke(FLOW_ID)
     client.invoke(FLOW_ID, read_timeout=900)
     assert seen == [client_module.INVOKE_READ_TIMEOUT, 900]
@@ -590,7 +596,7 @@ def test_create_flow_posts_to_flows() -> None:
 
     def answer(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return v2_ok({"id": FLOW_ID, "name": "研究"})
+        return v2_ok({"id": FLOW_ID, "name": "研究", "version_id": 7})
 
     mock = PlatformMock().post("/api/v2/flows", answer)
     row = _client(mock).create_flow("研究", _definition(), description="d")
@@ -620,10 +626,11 @@ def test_invoke_continuation_carries_both_ids() -> None:
     client.invoke(FLOW_ID)
     client.invoke(FLOW_ID, session_id="s1", message_id=38, inputs={"input_1": {"user_input": "hi"}})
     first, second = (json.loads(r.content) for r in seen)
-    assert first == {"workflow_id": FLOW_ID, "stream": False}
+    # Streamed: the session id arrives with the first event, so a long round stays continuable.
+    assert first == {"workflow_id": FLOW_ID, "stream": True}
     assert second == {
         "workflow_id": FLOW_ID,
-        "stream": False,
+        "stream": True,
         "session_id": "s1",
         "message_id": 38,
         "input": {"input_1": {"user_input": "hi"}},
@@ -713,3 +720,49 @@ def test_cache_entry_is_a_verbatim_copy(tmp_path: Path) -> None:
     assert entry["templates"] == templates()
     canonical = json.dumps(templates(), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     assert entry["sha256"] == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+# ---- AC-43: a key with no usable resource owner -------------------------------------
+
+#: What ``open_endpoints/domain/utils.py`` raises, rendered by the v2 HTTP-exception
+#: handler: an envelope with the HTTP status as ``status_code`` and no ``data``.
+_OWNER_UNAVAILABLE = httpx.Response(
+    404, json={"status_code": 404, "status_message": "Open API resource owner is unavailable"}
+)
+_OWNER_INCOMPATIBLE = httpx.Response(
+    500, json={"status_code": 500, "status_message": "Open API execution has no compatible resource owner"}
+)
+
+
+@pytest.mark.parametrize("reply", [_OWNER_UNAVAILABLE, _OWNER_INCOMPATIBLE], ids=["unavailable", "incompatible"])
+@pytest.mark.parametrize("call", ["read", "write", "run"])
+def test_missing_resource_owner_is_not_a_missing_workflow(reply: httpx.Response, call: str) -> None:
+    mock = PlatformMock().get(FLOW_PATH, reply).post(VERSIONS_PATH, reply).post("/api/v2/workflow/invoke", reply)
+    client = _client(mock)
+    action = {
+        "read": lambda: client.current_definition(FLOW_ID),
+        "write": lambda: client.create_version(FLOW_ID, "v", _definition()),
+        "run": lambda: client.invoke(FLOW_ID),
+    }[call]
+    with pytest.raises(CliError) as caught:
+        action()
+    err = caught.value
+    assert err.exit_code == EXIT_FORBIDDEN
+    assert "归属人" in err.message
+    assert "不存在" not in err.message and "push --create" not in err.next_step
+
+
+def test_plain_missing_workflow_is_still_missing() -> None:
+    reply = httpx.Response(404, json={"status_code": 404, "status_message": "This resource does not exist"})
+    with pytest.raises(CliError) as caught:
+        _client(PlatformMock().get(FLOW_PATH, reply)).current_definition(FLOW_ID)
+    assert caught.value.exit_code == EXIT_LOCAL_INVALID and "不存在" in caught.value.message
+
+
+@pytest.mark.parametrize("data", [{"session_id": "s"}, {"session_id": "s", "events": None}, {"events": {}}])
+def test_invoke_envelope_must_carry_an_event_list(data) -> None:
+    """A JSON reply to a run is a defect unless it lists the round's events — "no events" is not "nothing happened"."""
+    mock = PlatformMock().post("/api/v2/workflow/invoke", v2_ok(data))
+    with pytest.raises(CliError) as caught:
+        _client(mock).invoke(FLOW_ID)
+    assert caught.value.exit_code == EXIT_DEFECT

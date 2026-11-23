@@ -30,6 +30,7 @@ _HANDLER_PATHS = {
     "skills": "bisheng_cli.commands.skills:run",
     "dev": "bisheng_cli.commands.dev:run",
     "platforms": "bisheng_cli.commands.platforms:run",
+    "flow": "bisheng_cli.commands.flow:run",
 }
 
 
@@ -62,7 +63,7 @@ def run(
 
     if not command:
         emitter.error(parser.format_usage().strip())
-        emitter.error("错误: 缺少子命令。可用: login / deploy / logs / skills sync / dev / platforms")
+        emitter.error("错误: 缺少子命令。可用: login / deploy / logs / skills sync / dev / platforms / flow")
         emitter.result(command, ok=False, exit_code=EXIT_USAGE)
         return EXIT_USAGE
 

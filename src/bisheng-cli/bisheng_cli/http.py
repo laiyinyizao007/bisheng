@@ -14,8 +14,10 @@ the CLI still says no".
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -144,6 +146,28 @@ class PlatformClient:
     # ---- requests -------------------------------------------------------
 
     def request(self, method: str, path: str, *, read_timeout: float | None = None, **kwargs: Any) -> httpx.Response:
+        return self._send(method, path, read_timeout, stream=False, **kwargs)
+
+    @contextlib.contextmanager
+    def stream(
+        self, method: str, path: str, *, read_timeout: float | None = None, **kwargs: Any
+    ) -> Iterator[httpx.Response]:
+        """Like ``request``, but the body is read by the caller as it arrives.
+
+        Same header, timeout and connection-error handling as ``request``.
+        ``read_timeout`` bounds the wait for *each* chunk, not the whole body; an
+        error raised while the caller iterates is httpx's own, because only the
+        caller knows what a stall in the middle of its stream means.
+        """
+        resp = self._send(method, path, read_timeout, stream=True, **kwargs)
+        try:
+            yield resp
+        finally:
+            resp.close()
+
+    def _send(
+        self, method: str, path: str, read_timeout: float | None, *, stream: bool, **kwargs: Any
+    ) -> httpx.Response:
         headers = dict(kwargs.pop("headers", {}) or {})
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -152,7 +176,8 @@ class PlatformClient:
         )
         started = time.monotonic()
         try:
-            resp = self._client.request(method, path, headers=headers, timeout=timeout, **kwargs)
+            request = self._client.build_request(method, path, headers=headers, timeout=timeout, **kwargs)
+            resp = self._client.send(request, stream=stream)
         except httpx.HTTPError as exc:
             raise self._connection_error(method, path, exc)
         if self.emitter is not None:

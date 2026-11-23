@@ -35,7 +35,7 @@ def _all_option_strings(parser) -> set[str]:
 def test_help_lists_registered_commands() -> None:
     parser = build_parser()
     names = {name for name, _ in _subparser_actions(parser)}
-    assert names == {"login", "deploy", "logs", "skills", "dev", "platforms", "init"} == set(SUBCOMMANDS)
+    assert names == {"login", "deploy", "logs", "skills", "dev", "platforms", "init", "flow"} == set(SUBCOMMANDS)
 
 
 def test_help_footer_declares_deferred_commands() -> None:

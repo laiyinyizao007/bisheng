@@ -116,7 +116,10 @@ class PublishedWorkflowService:
     @staticmethod
     async def iter_events(invocation: WorkflowInvocation, *, stream: bool) -> AsyncIterator[WorkflowOutputEvent]:
         async for event in invocation.callback.get_response_until_break():
-            if event.category == "node_run":
+            # node_run is progress noise for an API caller and stays dropped — except
+            # a node's *failed* end, the only event that names the node a run died in
+            # (the closing error carries just the exception text; F005 AC-32).
+            if event.category == "node_run" and not _is_failed_node_end(event):
                 continue
             if not stream and event.category == "stream_msg" and event.type == "stream":
                 continue
@@ -156,6 +159,11 @@ class PublishedWorkflowService:
         session = await ChatSessionService.get_subject_session_if_exists(chat_id, session_subject)
         if session is not None and session.flow_id != workflow_id:
             raise NotFoundError.http_exception()
+
+
+def _is_failed_node_end(event: object) -> bool:
+    message = getattr(event, "message", None)
+    return getattr(event, "type", None) == "end" and isinstance(message, dict) and bool(message.get("reason"))
 
 
 __all__ = [

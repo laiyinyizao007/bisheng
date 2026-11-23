@@ -123,3 +123,24 @@ def test_missing_declaration_file_is_local_error(tmp_path: Path) -> None:
 def test_include_on_non_scalar_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(CliError):
         load_spec(write(tmp_path, "flow.yaml", "name: wf\nnodes: []\np: !include [a, b]\n"))
+
+
+@pytest.mark.parametrize("reference", ["../secret.txt", "sub/../../secret.txt", "ABSOLUTE"])
+def test_include_cannot_leave_the_declaration_directory(tmp_path: Path, reference: str) -> None:
+    """Included text is sent to the platform on push, so a path outside the project is refused."""
+    secret = write(tmp_path, "secret.txt", "-----BEGIN PRIVATE KEY-----")
+    project = tmp_path / "project"
+    if reference == "ABSOLUTE":
+        reference = secret.resolve().as_posix()
+    spec_path = write(project, "flow.yaml", f"name: wf\nnodes: []\np: !include {reference}\n")
+    with pytest.raises(CliError) as excinfo:
+        load_spec(spec_path)
+    assert excinfo.value.exit_code == EXIT_LOCAL_INVALID
+    assert "BEGIN PRIVATE KEY" not in str(excinfo.value.details) + excinfo.value.message
+    assert "目录" in excinfo.value.message
+
+
+def test_include_in_a_subdirectory_is_fine(tmp_path: Path) -> None:
+    write(tmp_path, "a/b/p.md", "deep")
+    spec = load_spec(write(tmp_path, "flow.yaml", "name: wf\nnodes: []\np: !include a/b/../b/p.md\n"))
+    assert spec["p"] == "deep"

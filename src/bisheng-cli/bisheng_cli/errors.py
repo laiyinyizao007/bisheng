@@ -255,6 +255,35 @@ ERROR_HINTS: dict[int, tuple[str, str]] = {
         "该操作仅限应用归属人执行",
         "改用资源归属人是该应用 owner 的那把密钥。",
     ),
+    # --- F005, 105 segment: workflows (`bisheng flow`) ---
+    # Only codes the flow commands can actually receive on the v2 face. 10599
+    # (`AppWriteAuthError`) is raised by v1 endpoints only; it is registered so
+    # that a gateway or a future v2 endpoint raising it still reads as "no write
+    # permission" rather than as an unknown code.
+    10525: (
+        "工作流处于上线状态，平台不允许修改它的当前版本",
+        "先在平台上把该工作流下线，再重跑同一条命令；已建好的版本仍在版本列表里，下线后可直接切换。",
+    ),
+    10529: (
+        "已有同名工作流",
+        "改掉声明文件里的 name 后重试；要更新已有的那条工作流，用 --flow-id 指向它而不是 --create。",
+    ),
+    10502: (
+        "这个工作流已有同名版本",
+        "用 --name 换一个版本名后重试；不带 --name 时 CLI 用「时间 + 随机后缀」生成版本名，直接重跑即可。",
+    ),
+    10500: (
+        "平台上找不到这个版本",
+        "用 bisheng flow diff --list-versions 查看可用的版本 id。",
+    ),
+    10543: (
+        "续跑的输入与平台正在等待的那条消息不匹配",
+        "用上一轮输出里给出的续跑参数（--resume）重跑；输入的字段要与等待的节点一致。",
+    ),
+    10599: (
+        "没有修改这个工作流的权限",
+        "CLI 以这把密钥的资源归属人身份写入：请工作流的归属人或管理员为这位归属人授予编辑权限，或改用归属人正确的密钥。",
+    ),
 }
 # Runtime v2 keeps the existing runtime code; its capacity remedy is unchanged.
 ERROR_HINTS[16125] = ERROR_HINTS[16226]
@@ -309,6 +338,14 @@ ERROR_EXIT_CODES: dict[int, int] = {
     16251: EXIT_PUBLISH_CONFLICT,
     16252: EXIT_PUBLISH_CONFLICT,
     16254: EXIT_PUBLISH_CONFLICT,
+    # F005, 105 segment. 10525 is "change something on the platform, then rerun"
+    # — the same next action as a hosted precheck, hence 10 and not 12.
+    10525: EXIT_PRECHECK_FAILED,
+    10529: EXIT_PUBLISH_CONFLICT,
+    10502: EXIT_PUBLISH_CONFLICT,
+    10500: EXIT_LOCAL_INVALID,
+    10543: EXIT_LOCAL_INVALID,
+    10599: EXIT_FORBIDDEN,
 }
 
 # Unregistered codes degrade by HTTP status class before falling to exit 19.

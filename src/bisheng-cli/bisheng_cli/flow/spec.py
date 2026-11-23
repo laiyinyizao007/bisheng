@@ -64,6 +64,11 @@ def _construct_include(loader: _SpecLoader, node: yaml.Node) -> str:
         raise yaml.constructor.ConstructorError(None, None, f"{INCLUDE_TAG} 只接受一个相对路径字符串", node.start_mark)
     reference = loader.construct_scalar(node)
     resolved = (loader.spec_dir / reference).resolve()
+    # Included text is compiled into the definition and sent to the platform on
+    # push, so it may only come from the declaration's own directory tree: a
+    # declaration taken from a PR must not be able to upload ``~/.ssh/id_rsa``.
+    if not resolved.is_relative_to(loader.spec_dir.resolve()):
+        raise _IncludeError(reference, resolved, "路径超出了声明文件所在目录（被引入的内容会随 push 发往平台）")
     try:
         return resolved.read_text(encoding="utf-8")
     except FileNotFoundError:

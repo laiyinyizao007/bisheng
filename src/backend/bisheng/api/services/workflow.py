@@ -1280,6 +1280,13 @@ class WorkFlowService(BaseService):
                     output_key=chat_response.message.get("output_key"),
                 )
                 cls.handle_source(chat_response, workflow_event)
+            case WorkflowEventType.NodeRun.value:
+                # Only the reason of a failed node goes out — never its inputs or
+                # logs, which hold whatever the run was fed (F005 AC-32).
+                workflow_event.status = chat_response.type
+                reason = chat_response.message.get("reason")
+                if reason:
+                    workflow_event.output_schema = WorkflowOutputSchema(message=str(reason))
             case WorkflowEventType.Error.value:
                 workflow_event.event = WorkflowEventType.Close.value
                 workflow_event.output_schema = WorkflowOutputSchema(message=chat_response.message)

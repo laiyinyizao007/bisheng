@@ -12,7 +12,7 @@
 | spec.md | ✅ 已评审 | 44 条 AC，EARS 句型；2026-11-20 用户确认 |
 | design.md | ✅ 已评审 | 9 条决策 + 23 条坑 + AC 落点索引；2026-11-20 用户确认 |
 | tasks.md | ✅ 已拆解 | 47 个任务，7 个 Wave；2026-11-20 `/sdd-review tasks` 通过 |
-| 实现 | 🔄 进行中 | Wave 1–2、Wave 4 完成，Wave 3 除 T017（挪到 Wave 5）外完成（28 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | Wave 1–5 完成（41 / 47）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -182,7 +182,7 @@
   **覆盖 AC**: AC-23
   **依赖**: 无
 
-- [ ] **T017**: 【实现】CLI `flow` 命令族接入（分发骨架）——**挪到 Wave 5 与 T031 同批落地**（见实际偏差记录）
+- [x] **T017**: 【实现】CLI `flow` 命令族接入（分发骨架）——**挪到 Wave 5 与 T031 同批落地**（见实际偏差记录）
   **文件**: `src/bisheng-cli/bisheng_cli/cli.py`、`src/bisheng-cli/bisheng_cli/main.py`、`src/bisheng-cli/bisheng_cli/commands/flow.py`（新）
   **逻辑**: `cli.py` 的 `SUBCOMMANDS` 加 `"flow"`；`flow` 是**两 token 命令**（照 `skills` / `platforms` 的形状）：`flow` 自己的 subparser 携带动词，每个动词叶子再镜像一遍全局 flag（`default=argparse.SUPPRESS`）；`main.py` 的 `_HANDLER_PATHS` 加 `"flow": "bisheng_cli.commands.flow:run"`；`commands/flow.py` 实现分发。**此时只注册已实现的子命令**（上游铁律：命令要么注册要么不存在，绝不注册桩）——本任务只接通 `compile` 的分发路径，其余动词在后续任务里追加。三处必须同时改，否则命令注册不完整
   **测试**: T016 全部通过
@@ -279,84 +279,84 @@
 
 > 每个任务**追加**一个子命令分支到 `commands/flow.py`，不重写已存在的分支。
 
-- [ ] **T030**: 【测试】`flow compile` 命令测试
+- [x] **T030**: 【测试】`flow compile` 命令测试
   **文件**: `src/bisheng-cli/tests/test_flow_command_compile.py`
   **逻辑**: 覆盖：合法声明 → 输出 `{nodes, edges, viewport}`；`--json` 时 NDJSON 走 stdout、人读文本走 stderr、**最后一行恒为 `result` 事件**；校验失败 → 退出码与可读原因（**不是堆栈**），`details` 里带全部问题项；`--overlay` 生效；`--out FILE` 写出结果
   **测试**: `test_compile_emits_definition` / `test_json_mode_splits_streams` / `test_result_event_is_last_line` / `test_validation_failure_reports_all_issues` / `test_overlay_applied` / `test_out_file_written`
   **覆盖 AC**: AC-06, AC-09, AC-18, AC-23
   **依赖**: T025, T027
 
-- [ ] **T031**: 【实现】`flow compile` 命令
+- [x] **T031**: 【实现】`flow compile` 命令
   **文件**: `src/bisheng-cli/bisheng_cli/commands/flow.py`
   **逻辑**: `compile` 分支：加载声明 → 应用覆盖层 → 取模板与工具列表 → 编译 → 校验 → 输出（`--json` 走 NDJSON；人读文本走 stderr）。**校验失败时退出码非 0，`details` 带全部问题项**
   **测试**: T030 全部通过
   **覆盖 AC**: AC-06, AC-09, AC-18, AC-23
   **依赖**: T030
 
-- [ ] **T032**: 【测试】`flow diff` 命令测试
+- [x] **T032**: 【测试】`flow diff` 命令测试
   **文件**: `src/bisheng-cli/tests/test_flow_command_diff.py`
   **逻辑**: 覆盖：默认基准 = 线上当前版本；`--version-id` 指定历史版本为基准；`--list-versions` 列出可用版本；差异输出**机器可读**（`details` 里的节点/参数/连线差异项可定位）；**人读呈现与机器可读呈现的差异内容一致**；线上不存在 / 无权 / 失败三态分别报错（**不报"无差异"**）；工作流 id 绑定写在项目内 `.bisheng/flow.json`（形状照 `.bisheng/app.json`）
   **测试**: `test_defaults_to_current_version` / `test_version_id_selects_historical_baseline` / `test_list_versions` / `test_machine_readable_details` / `test_human_and_machine_agree` / `test_three_failure_modes_distinguished` / `test_flow_binding_written_to_bisheng_dir`
   **覆盖 AC**: AC-19, AC-20, AC-21, AC-22, AC-23, AC-24
   **依赖**: T029, T031
 
-- [ ] **T033**: 【实现】`flow diff` 命令
+- [x] **T033**: 【实现】`flow diff` 命令
   **文件**: `src/bisheng-cli/bisheng_cli/commands/flow.py`
   **逻辑**: `diff` 分支：编译本地 → 取线上基准 → 跑 diff → 输出（结构化 + 人读）。`--version-id` / `--list-versions` 走 `GET /api/v2/flows/{flow_id}/versions[/{version_id}]`。**不做权限判定**（服务端说了算）
   **测试**: T032 全部通过
   **覆盖 AC**: AC-19, AC-20, AC-21, AC-22, AC-23, AC-24
   **依赖**: T032
 
-- [ ] **T034**: 【测试】`flow push` 命令测试
+- [x] **T034**: 【测试】`flow push` 命令测试
   **文件**: `src/bisheng-cli/tests/test_flow_command_push.py`
   **逻辑**: 覆盖：<br>① 推送后**新建**了一个版本，**既有版本的 data 未被改写**；<br>② 推送后**切为当前版本**，`Flow.data` 等于新版本 data；<br>③ 线上有独有内容时：**无 TTY → 拒绝**（不默认同意），要求 `--allow-drop-online-only`；有 TTY → 展示被保留在旧版本里的内容并要求确认；<br>④ 上线状态 → 报出"版本已建，但工作流在线上，需先下线"，**且不报推送成功**；<br>⑤ 权限不足 → 明确报出**缺少哪个权限位**，不退化为只读、不静默跳过；<br>⑥ 成功 → 报出**新版本的标识与版本名**；<br>⑦ `--no-activate` 只建版本不切
   **测试**: `test_push_creates_new_version` / `test_push_activates_new_version` / `test_existing_versions_untouched` / `test_online_only_content_refused_without_tty` / `test_online_only_content_requires_confirmation_with_tty` / `test_online_workflow_reports_offline_hint` / `test_missing_permission_reports_which_scope` / `test_reports_new_version_id_and_name` / `test_no_activate_only_creates_version`
   **覆盖 AC**: AC-25, AC-26, AC-27, AC-28, AC-29
   **依赖**: T033
 
-- [ ] **T035**: 【实现】`flow push` 命令
+- [x] **T035**: 【实现】`flow push` 命令
   **文件**: `src/bisheng-cli/bisheng_cli/commands/flow.py`
   **逻辑**: `push` 分支：编译 → 取当前版本 → diff → 有线上独有内容时按 `cli.py` 的 `confirm()` 语义处理（**无 TTY 时抛 `CliError(EXIT_USAGE)` 要求显式 flag，不默认同意**）→ `POST /api/v2/flows/{flow_id}/versions` 建新版本 → `POST .../activate` 切当前版本 → 报版本 id 与名称。`--no-activate` 只建不切；`--create` 先 `POST /api/v2/flows` 建工作流
   **测试**: T034 全部通过
   **覆盖 AC**: AC-25, AC-26, AC-27, AC-28, AC-29
   **依赖**: T034
 
-- [ ] **T036**: 【测试】`flow run` 命令测试
+- [x] **T036**: 【测试】`flow run` 命令测试
   **文件**: `src/bisheng-cli/tests/test_flow_command_run.py`
   **逻辑**: 覆盖：事件流被呈现出来；停在等待输入的节点时**报出停在哪个节点与等待什么输入**；续跑时**同时带 `session_id` 与 `message_id`**（缺一不可 —— 有专门的用例断言两个都发出去了）；节点失败时**报出失败节点与失败原因**（不只报"运行结束"）；**无 TTY 时不阻塞等待人工输入**（`--input` / `--input-file` 供一次性输入，跑到下一次等待输入就结束）
   **测试**: `test_events_are_streamed` / `test_reports_paused_node_and_expected_input` / `test_continuation_sends_session_and_message_id` / `test_node_failure_reports_node_and_reason` / `test_no_tty_does_not_block`
   **覆盖 AC**: AC-30, AC-31, AC-32, AC-33
   **依赖**: T027
 
-- [ ] **T037**: 【实现】`flow run` 命令
+- [x] **T037**: 【实现】`flow run` 命令
   **文件**: `src/bisheng-cli/bisheng_cli/commands/flow.py`
   **逻辑**: `run` 分支：调 `POST /api/v2/workflow/invoke`（`workflow:invoke` scope，既有端点），呈现事件流；遇 input 事件时报出节点与待输入内容，交互式读 stdin / 非交互式用 `--input` / `--input-file`；续跑时 body **同时带 `session_id` 与 `message_id`**
   **测试**: T036 全部通过
   **覆盖 AC**: AC-30, AC-31, AC-32, AC-33
   **依赖**: T036
 
-- [ ] **T038**: 【测试】`flow tool` 命令测试
+- [x] **T038**: 【测试】`flow tool` 命令测试
   **文件**: `src/bisheng-cli/tests/test_flow_command_tool.py`
   **逻辑**: 覆盖：注册后**报出工具类型标识与各可用操作的标识**（工作流声明要按 operationId 引用它们）；`list` 报出各工具类型及其可用操作；权限不足时**明确报出权限不足**（**不报注册成功**）
   **测试**: `test_register_reports_tool_and_operation_ids` / `test_list_reports_types_and_operations` / `test_permission_error_not_reported_as_success`
   **覆盖 AC**: AC-34, AC-35, AC-36, AC-37
   **依赖**: T027
 
-- [ ] **T039**: 【实现】`flow tool` 命令
+- [x] **T039**: 【实现】`flow tool` 命令
   **文件**: `src/bisheng-cli/bisheng_cli/commands/flow.py`
   **逻辑**: `tool` 分支的两个动词：`register <openapi.yaml>`（调 `POST /api/v2/tools/schema` → `POST /api/v2/tools`，报出工具类型标识与各操作标识）与 `list`（调 `GET /api/v2/tools`，报出各工具类型及其可用操作）
   **测试**: T038 全部通过
   **覆盖 AC**: AC-34, AC-35, AC-36, AC-37
   **依赖**: T038
 
-- [ ] **T040**: 【测试】105xx 错误码 → 退出码映射测试
+- [x] **T040**: 【测试】105xx 错误码 → 退出码映射测试
   **文件**: `src/bisheng-cli/tests/test_errors.py`
   **逻辑**: 断言 `ERROR_EXIT_CODES` 覆盖 10525 / 10529 / 10502 / 10500 / 10543 / 10599 并映射到预期的退出码（`EXIT_PRECHECK_FAILED` / `EXIT_PUBLISH_CONFLICT` / `EXIT_LOCAL_INVALID` / `EXIT_FORBIDDEN`）；断言缺 scope（26003）的既有中文提示仍生效；断言**新增条目没有改动任何既有映射**（别把别的命令的退出码改掉）
   **测试**: `test_flow_error_codes_mapped` / `test_missing_scope_hint_preserved` / `test_existing_mappings_unchanged`
   **覆盖 AC**: AC-28, AC-41
   **依赖**: 无
 
-- [ ] **T041**: 【实现】105xx 错误码 → 退出码映射
+- [x] **T041**: 【实现】105xx 错误码 → 退出码映射
   **文件**: `src/bisheng-cli/bisheng_cli/errors.py`
   **逻辑**: 在 `ERROR_EXIT_CODES` **新增** 105 段映射（10525 → `EXIT_PRECHECK_FAILED`；10529 / 10502 → `EXIT_PUBLISH_CONFLICT`；10500 / 10543 → `EXIT_LOCAL_INVALID`；10599 → `EXIT_FORBIDDEN`），并在 `ERROR_HINTS` 补中文说明（**只增不改**既有条目）
   **测试**: T040 全部通过
@@ -437,3 +437,6 @@
 - **Wave 4 偏差（2026-11-22）**：① **模板缓存不带"平台版本指纹"**——design 决策 2 写了"带平台返回的版本指纹"，但 v2 模板端点只回列表，`/dev-toolkit/versions` 也没有平台版本号，平台根本不发这个指纹。改为：缓存条目按归一化 `base_url` 分条，记 CLI 版本、取回时间、内容 sha256；四项都成立且未超过 `TEMPLATE_CACHE_TTL`（1 小时）才命中，其余一律回平台重取，**重取失败即失败、旧条目不升格为兜底**（AC-05）；`refresh=True` 绕过缓存。模板是后端常量、只随平台升级变化，1 小时是"升级后最久多久才被察觉"的上界；② **读失败三态落在客户端层**：平台对不存在回 404（`NotFoundError`）/ 10500（版本），对无可见权限回 403（FGA）——三态可如实区分，按场景翻成不同退出码与下一步，`details` / `hints` 原样透传；105xx 的全局退出码映射仍按计划在 T040/T041（Wave 5）；③ **diff 比较表多纳入 `data.type`**（同 id 换了节点类型），按决策 5"新增即纳入"；参数值按规范化 JSON 比较（`7`≠`"7"`、`True`≠`1`，dict 键序不计）；连线按多重集合计数；④ **人读呈现**：长值从第一处不同的字符前 40 字起截取（从头截会把真正改动的那句截掉——用 invest v3 真实提示词复现过），完整值见 `--json`；⑤ `compiler.resolve_tool` 公开化，`FlowClient.tool_key` 复用同一解析器，不另写一份；⑥ **验证**：新增测试 82 个；变异 38 条全部被杀（中途两条存活：读失败翻译后丢 `details`、单边长参数不截断——均补测试后被杀）；diff 模糊测试 20 种子 × 3000 次（3.2 万次完成比较、2.8 万次按畸形拒绝、0 次意外异常）；真实数据：DSL 编译的 invest v3 与 `build_v3.build()` diff 为一致，叠加 4 处模拟网页改动（改提示词、改名、删连线、加节点）+ 拖画布 + 改文案，正好报出 4 处
 - **Wave 4 G8 第一轮（2026-11-22，codex，40/50）**：采纳——批注节点（`data.type == "note"`，引擎跳过、DSL 无此类型）原先会被报成"线上独有节点"，改为单列提示、不计入差异；`data.id` 未比较（引擎按 `data.id` 建图，改了它 diff 却说一致）→ 纳入；`group_params: null`（`BaseNodeData` 允许）被当成平台缺陷 → 视为无参数；无信封的 404 被报成"工作流不存在" → 实为路由不存在（平台过老 / 地址错），改报 `EXIT_PLATFORM_TOO_OLD`；缓存临时文件用固定名，并发写可能装入半截文件 → `mkstemp` + 清理；10599 只在 v1 端点出现 → 从 v2 的拒绝码里删掉；工具列表的子项必须是对象。**不采纳**：未在 YAML 声明 `name`/`description` 时不比较它们——决策 5 明确纳入，push 确实会改掉线上显示名，diff 就该报（交用户复核）；10525/10529 的退出码按计划在 T040/T041 统一登记
 - **Wave 4 G8 第二轮（2026-11-22，codex 深度，39/50）**：H1 信封里 `status_code` 不是整数时 `parse_envelope` 当成功 → 一次被拒的写会被报成成功（AC-27/29），改判契约缺陷，且写操作回包逐个查形状（新版本必须有整数 `id`）；H2 非流式运行 240 s 超时被报成"平台不可达" → 单独报"这一轮运行超时"（`EXIT_WAIT_TIMEOUT`），超时可由调用方指定；**根治（流式运行、先拿到会话标识）留给 T037**；M1 运行失败另立分类（无权时说"使用"权限，不说"编辑"）；M2 增 `diff.online_only_items`，给 push 的 AC-26 判定用，不能用 `count()`；M3 NaN/Infinity 会让 `--json` 输出非法 JSON → diff 拒绝；M4 缓存键改为 `base_url` 摘要（地址里的账号密码不落盘），缓存目录自带 `.gitignore`；M5 版本号只认 ASCII 数字（`"²".isdigit()` 为真但 `int` 崩）；L1 `edges: null` 视为无连线；L3 缓存文件超 16 MB 视为未命中；L5 补 FastAPI 风格 JSON 404 的用例。**不采纳**：L4 版本列表 `total`（Wave 5 `--list-versions` 需要时再加）、L6 强制 https（既有 login 的范围，不在本 feature）。**两轮修复后**：变异 59 条全部被杀（期间 3 次锚点因重构失效，按规矩搬锚点、未删变异）；diff 模糊测试 6 万次 0 次意外异常；invest v3 真实数据对照仍为一致；CLI 全量 786 通过，失败仍为既有 6 条
+- **Wave 5 偏差（2026-11-22）**：① **T017 与 T031 同批落地**，`flow` 为两 / 三 token 命令（`flow tool register|list`），8 个叶子全部镜像全局 flag，T016 的参数化契约测试自动纳入；② **AC-32 需要后端配合（用户 2026-11-22 选定）**：v2 invoke 原先丢弃全部 `node_run`，失败节点只出现在被丢的那条事件里 → `PublishedWorkflowService.iter_events` 只放行"带 reason 的结束事件"，转换时只带节点标识与原因；③ **`flow run` 改走流式 invoke**（Wave 4 G8 H2 的根治）：会话标识随第一个事件到达；`--wait-timeout` 是等下一个事件的上限；非流式回包仍可解析（平台拒绝时的信封）；④ **续跑跨进程**：无人值守时停在等待输入即 exit 0，给出 `--resume r1.<base64url>` 凭据（工作流 / 会话 / 等待消息 / 节点 / 字段名，严格校验），并新增 `--input-json`（表单多字段一段文本填不了）——design §6.4 原面只有 `--input` / `--input-file`；⑤ **push 的"线上独有"以本检出上次推送的定义为共同祖先**（`.bisheng/cache/last_push.json`，design 决策 4 补充）：否则每次改参数再推都要确认，flag 会被无条件带上；⑥ **绑定文件位于声明文件旁**（不随 CWD），按平台 → 声明文件名索引；`diff` / `push` / `run` 在显式 `--flow-id` 且读取成功后写绑定；⑦ `push` 与线上全等时不建版本；`--create` 走 `POST /api/v2/flows`（平台同时建出当前版本并回 `version_id`）；⑧ `tool register` 按注册端点允许的键裁剪解析草稿并去掉空值（注册体 `extra="forbid"`，且显式 `null` 会盖掉平台默认值）；⑨ 10599 按 T041 注册为 `EXIT_FORBIDDEN`，客户端层不再加"无权修改"措辞（v1 专用码）；⑩ **验证**：新增 CLI 测试约 120 个 + 后端 6 个；CLI 全量 909 通过（失败仍为既有 6 条）；后端 `test/open_api` 改前改后失败集合逐条相同（44 条既有）；变异 51 条全部被杀（第二轮修复后一条存活：客户端"信封必须带事件列表"被命令层新加的"一轮必须以 close 或等待输入收尾"遮蔽，补了直指客户端那条规则的见证用例后被杀）
+- **Wave 5 G8 第一轮（2026-11-22，codex，42/50）**：采纳——H1 资源归属人不可用（平台以 HTTP 404/500 + 固定文案拒绝）被翻成"工作流不存在，重新 push --create" → 按文案精确识别，报 `EXIT_FORBIDDEN` 与"没有可用的资源归属人"（AC-43）；H2 免确认时结果报 `online_only_dropped: 0` 而人读说有 N 处 → 照报条数并加 `online_only_confirmation`；M5 注册回包没有操作仍报成功 → `EXIT_DEFECT`；M6 `flow.json` 改为原子替换；L7 `run` 不检查声明文件存在 → 拒绝；L8 续跑与绑定冲突的提示不可执行 → 给出 `--flow-id <凭据所属>`；L9 默认版本名秒级会撞 10502 → 加随机后缀。**部分采纳** M3（last_push 无完整性保护）：只在与线上语义全等时才被采信，损坏只会多问一次，不加校验和；文档里"machine-local"改为"本检出、不进 git"。**不采纳** M4（失败原因可能含输入）：同一段 `str(e)` 早已随收尾错误事件 `data.exception` 下发给 v2 调用方，不新增暴露面，改为在 design §6.1 登记事件增量；L10（last_push 存整份定义）：每个工作流一条，内容即仓库里 YAML 的编译结果
+- **Wave 5 G8 第二轮（2026-11-22，codex 深度，40/50）**：采纳——H1 一轮既无 `close` 也未停住却报"运行完成"（含信封缺 `events`） → `EXIT_DEFECT`；H2 `push --create` 平台已建工作流、本地绑定写失败却崩成 exit 1 且丢掉 id → 绑定写入降为告警并给出 `--flow-id`，结果带 `binding_saved`；M3 `!include` 可读仓库外文件并随 push 上传 → **推翻 design 决策 7 的"不禁止"**，限定在声明目录树内；M4 线上取值回显时第三方模型密钥（`sk-…`）不被遮蔽 → 全局掩码新增 `sk-` 规则（≥20 字符，不误伤 `sk-learn`）；M5 平台帧缺会话标识时发出自己读不回的续跑凭据 → `EXIT_DEFECT`；L6 `--create` 回包缺 `version_id` 仍报成功 → 纳入必填；L7 用户停止被报成节点失败 → `EXIT_CANCELLED`。**未纳入本次提交**：L8 工作树里的 `probe_*.py` 是 11-21 codex 审查遗留，删除待用户确认。第一轮修复全部经第二轮复验通过
