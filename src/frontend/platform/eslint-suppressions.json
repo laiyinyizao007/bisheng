@@ -1500,9 +1500,6 @@
     "no-console": {
       "count": 2
     },
-    "no-restricted-syntax": {
-      "count": 2
-    },
     "react-hooks/exhaustive-deps": {
       "count": 5
     }

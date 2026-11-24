@@ -26,7 +26,7 @@ async function collect<T>(source: AsyncGenerator<T>): Promise<T[]> {
 
 it("posts the request body to the copilot endpoint and yields its events", async () => {
     vi.mocked(requestStream).mockResolvedValueOnce(streamOf('{"type":"status","stage":"generating","attempt":1}\n{"type":"done"}\n'));
-    const payload = { flow_id: "f1", canvas: { nodes: [], edges: [] }, history: [], message: "加一个节点" };
+    const payload = { flow_id: "f1", canvas: { nodes: [], edges: [] }, history: [], message: "add a node" };
     const signal = new AbortController().signal;
 
     const events = await collect(streamCopilot(payload, signal));
@@ -35,10 +35,13 @@ it("posts the request body to the copilot endpoint and yields its events", async
     expect(events.map((e) => e.type)).toEqual(["status", "done"]);
 });
 
+// Two 3-byte UTF-8 characters, built at run time (source files keep no CJK literals).
+const MULTIBYTE = String.fromCodePoint(0x5df2, 0x52a0);
+
 it("reassembles lines split across chunks, including multi-byte characters", async () => {
-    const line = JSON.stringify({ type: "message", text: "已加入摘要节点" });
+    const line = JSON.stringify({ type: "message", text: `${MULTIBYTE} summary` });
     const bytes = new TextEncoder().encode(line + "\n" + '{"type":"done"}');
-    const cut = 5 + new TextEncoder().encode('{"type":"message","text":"已').length; // inside a 3-byte character
+    const cut = new TextEncoder().encode('{"type":"message","text":"').length + 1; // inside the first 3-byte character
     const reader = new ReadableStream<Uint8Array>({
         start(controller) {
             controller.enqueue(bytes.slice(0, cut));
@@ -47,7 +50,7 @@ it("reassembles lines split across chunks, including multi-byte characters", asy
         },
     });
     const events = await collect(readNdjson(reader));
-    expect(events).toEqual([{ type: "message", text: "已加入摘要节点" }, { type: "done" }]);
+    expect(events).toEqual([{ type: "message", text: `${MULTIBYTE} summary` }, { type: "done" }]);
 });
 
 it("checks availability silently so the drawer can show the reason itself", async () => {
@@ -57,7 +60,7 @@ it("checks availability silently so the drawer can show the reason itself", asyn
 });
 
 it("rejects when the copilot is unavailable", async () => {
-    const failure = Object.assign(new Error("未配置工作流默认模型"), { status_code: 10560 });
+    const failure = Object.assign(new Error("workflow default model not configured"), { status_code: 10560 });
     vi.mocked(request.get).mockRejectedValueOnce(failure);
     await expect(checkCopilotAvailability("f1")).rejects.toBe(failure);
 });

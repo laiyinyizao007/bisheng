@@ -29,9 +29,9 @@ describe("shared streaming request policy", () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(ndjson()));
     vi.stubGlobal("fetch", fetchMock);
     const { requestStream } = await import("./requestStream");
-    await requestStream("/api/v1/workflow/copilot", undefined, { message: "加一个节点", history: [] });
+    await requestStream("/api/v1/workflow/copilot", undefined, { message: "add a node", history: [] });
     await requestStream("/api/v1/audit");
-    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body)).toEqual({ message: "加一个节点", history: [] });
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body)).toEqual({ message: "add a node", history: [] });
     expect(fetchMock.mock.calls[1]?.[1].body).toBe("{}");
   });
   it("reuses base URL and Bearer authentication without buffering the successful body", async () => {

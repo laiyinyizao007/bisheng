@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | ✅ 已拆解 | codex tasks 审查两轮；第二轮唯一的 high（AC-05 无保障）由用户选定「copilot 层走向检查」解决 |
-| 实现 | 🔄 进行中 | 17 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | 20 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -247,7 +247,7 @@
   **测试**：vitest 覆盖带 body 与默认 body 两种情况
   **依赖**：T016
 
-- [ ] **T018**: 编辑页接线：应用回调与面板互斥
+- [x] **T018**: 编辑页接线：应用回调与面板互斥
   **文件**：
   - `pages/BuildPage/flow/Panne.tsx`（应用回调：先 `takeSnapshot` 再落画布）
   - `Header.tsx`：copilot 入口按钮（AC-01 的入口归本任务）
@@ -262,7 +262,7 @@
   **覆盖 AC**：AC-01（入口）、AC-02、AC-18
   **依赖**：无
 
-- [ ] **T019**: copilot 抽屉
+- [x] **T019**: copilot 抽屉
   **文件**：
   - `pages/BuildPage/flow/Copilot/{CopilotDrawer,DiffPreview,canvasDigest}.tsx|ts`
   - `Panne.tsx`：只挂载抽屉、提升对话状态（应用回调由 T018 完成）
@@ -284,7 +284,7 @@
   **覆盖 AC**：AC-01、AC-03、AC-11、AC-17、AC-19、AC-20、AC-21、AC-27
   **依赖**：T007、T017、T018
 
-- [ ] **T020**: 前端文案核对（文案已随 T019 加入）
+- [x] **T020**: 前端文案核对（文案已随 T019 加入）
   **逻辑**：`pnpm check-i18n` 三语键集对齐；后端错误码 10560–10563 的 `api_errors` 文案与前端提示一致。
   **依赖**：T019
 

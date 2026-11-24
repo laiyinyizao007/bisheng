@@ -5,7 +5,7 @@ import { copyReportTemplate } from "@/controllers/API/workflow";
 import { WorkFlow,WorkflowNode } from "@/types/flow";
 import { autoNodeName,calculatePosition,filterUselessFlow,initNode,useCopyPasteNode } from "@/util/flowUtils";
 import { useUndoRedo } from "@/util/hook";
-import { Background,BackgroundVariant,Connection,ReactFlow,addEdge,applyEdgeChanges,applyNodeChanges,useReactFlow } from '@xyflow/react';
+import { Background,BackgroundVariant,Connection,Edge,Node,ReactFlow,addEdge,applyEdgeChanges,applyNodeChanges,useReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/base.css';
 import '@xyflow/react/dist/style.css';
 import cloneDeep from "lodash-es/cloneDeep";
@@ -17,6 +17,8 @@ import FlowNode from "./FlowNode";
 import Header from "./Header";
 import NoteNode from "./NoteNode";
 import Sidebar from "./Sidebar";
+import CopilotDrawer from "./Copilot/CopilotDrawer";
+import { applyCanvas } from "./Copilot/panels";
 import useFlowStore from "./flowStore";
 
 // 自定义组件
@@ -59,7 +61,7 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
      */
     useEffect(() => {
         if (reactFlowInstance && flow) {
-            console.log('数据更新 :>> ', reactFlowInstance.toObject());
+            console.log('flow updated :>> ', reactFlowInstance.toObject());
             const { nodes, edges, viewport } = reactFlowInstance.toObject()
             flow.nodes = nodes
             flow.edges = edges
@@ -96,12 +98,24 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
     }, [takeSnapshot]);
 
     const [showApiPage, setShowApiPage] = useState(false)
+    // F007: the copilot drawer's open state lives here, beside the canvas it edits.
+    const [copilotOpen, setCopilotOpen] = useState(false)
+    const applyCopilotCanvas = useCallback((canvas: { nodes: Node[]; edges: Edge[] }) => {
+        applyCanvas({ takeSnapshot, setNodes, setEdges }, canvas)
+    }, [takeSnapshot, setNodes, setEdges])
+    // The canvas as it is right now (unsaved edits included): what a copilot turn is based on.
+    const getCopilotCanvas = useCallback(() => {
+        const current = reactFlowInstance?.toObject()
+        return { nodes: current?.nodes ?? nodes, edges: current?.edges ?? edges, viewport: current?.viewport }
+    }, [reactFlowInstance, nodes, edges])
 
     return <div className="flex flex-col h-full overflow-hidden">
         <Header
             flow={flow}
             nodes={nodes}
             onTabChange={(type) => setShowApiPage('api' === type)}
+            copilotOpen={copilotOpen}
+            onCopilotOpenChange={setCopilotOpen}
             preFlow={preFlow}
             onImportFlow={(nodes, edges, viewport) => {
                 setNodes(nodes)
@@ -172,7 +186,7 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
                             onNodeDragStart={onNodeDragStart} // 快照
                             onSelectionDragStart={onSelectionDragStart} // 快照
                             onNodesDelete={() => {
-                                console.log('【删除节点】');
+                                console.log('[nodes deleted]');
                                 takeSnapshot(flow)
                             }} // 更新setEdges
                             // 自定义线组件
@@ -199,6 +213,13 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
         <div className={`flex flex-1 min-h-0 overflow-hidden ${showApiPage ? '' : 'hidden'}`}>
             <ApiMainPage type={'flow'} />
         </div>
+        <CopilotDrawer
+            open={copilotOpen && !showApiPage}
+            flowId={flow?.id ? String(flow.id) : ''}
+            getCanvas={getCopilotCanvas}
+            onApply={applyCopilotCanvas}
+            onClose={() => setCopilotOpen(false)}
+        />
     </div>
 };
 
