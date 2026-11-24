@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | ✅ 已拆解 | codex tasks 审查两轮；第二轮唯一的 high（AC-05 无保障）由用户选定「copilot 层走向检查」解决 |
-| 实现 | 🔄 进行中 | 5 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | 6 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -112,7 +112,7 @@
   **覆盖 AC**：AC-24
   **依赖**：T004
 
-- [ ] **T006**: `bisheng flow export`（测试 + 实现）
+- [x] **T006**: `bisheng flow export`（测试 + 实现）
   **文件**：
   - `src/bisheng-cli/bisheng_cli/cli.py`、`commands/flow.py`
   - `src/bisheng-cli/tests/test_command_flow_export.py`
