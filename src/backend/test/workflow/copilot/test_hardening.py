@@ -319,3 +319,123 @@ async def test_the_usable_lists_are_reused_briefly_per_user(monkeypatch: pytest.
     clock[0] += resources_module.CATALOGUE_CACHE_SECONDS
     await resources_module.load_catalogue(request=None, login_user=alice)
     assert calls.count(("tools", 1)) == 2  # expired: listed again
+
+
+# ---- G8 round 2 ----------------------------------------------------------------------------------
+
+
+async def test_a_value_rewritten_around_the_marker_is_refused_not_landed(scripted_llm) -> None:
+    turn = prepare(_with_sql_agent())
+    shown = _shown_declaration(turn)
+    rewritten = shown.replace(f"db_password: {redact.REDACTED}", f"db_password: Bearer-{redact.REDACTED}")
+    assert rewritten != shown
+    scripted_llm(answer(rewritten), answer(rewritten), answer(rewritten))
+    events = await run(turn)
+    assert not of(events, "proposal")
+    (issues,) = of(events, "issues")
+    assert any("db_password" in text and "改写" in text for text in issues["issues"])
+
+
+@pytest.mark.parametrize("key", ["accessToken", "dbPassword", "x-api-key", "pwd123", "password_input", "authHeader"])
+def test_credential_words_count_anywhere_in_the_key(key: str) -> None:
+    assert redact.is_sensitive(key)
+
+
+@pytest.mark.parametrize("key", ["max_tokens", "user_auth", "model_id", "system_prompt", "key"])
+def test_ordinary_keys_are_not_credentials(key: str) -> None:
+    assert not redact.is_sensitive(key)
+
+
+def test_a_structure_under_a_credential_key_is_hidden_whole_and_restored_whole() -> None:
+    base = {"nodes": [{"id": "a", "params": {"api_key": {"value": "sk-1", "env": "prod"}}}]}
+    hidden, count = redact.redact(base)
+    assert count == 1 and hidden["nodes"][0]["params"]["api_key"] == redact.REDACTED
+    answer_spec = copy.deepcopy(hidden)
+    assert redact.restore(answer_spec, base) == []
+    assert answer_spec["nodes"][0]["params"]["api_key"] == {"value": "sk-1", "env": "prod"}
+
+
+async def test_repeated_node_ids_are_fed_back_not_crashed(scripted_llm) -> None:
+    twice = FULL_FLOW.replace(
+        "  - id: end_1\n    type: end\n", "  - id: end_1\n    type: end\n  - id: end_1\n    type: end\n"
+    )
+    scripted_llm(answer(twice), answer(twice), answer(twice))
+    events = await run(prepare())
+    assert not of(events, "error")
+    (issues,) = of(events, "issues")
+    assert any("end_1" in text and "重复" in text for text in issues["issues"])
+
+
+async def test_the_whole_turn_has_a_deadline_across_attempts(scripted_llm, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(service_module, "MODEL_TIMEOUT_SECONDS", 60.0)
+    monkeypatch.setattr(service_module, "TURN_TIMEOUT_SECONDS", 0.05)
+    state = scripted_llm(answer(FULL_FLOW))
+    state["gate"] = asyncio.Event()
+    events = await asyncio.wait_for(run(prepare()), timeout=5)
+    (error,) = of(events, "error")
+    assert "TimeoutError" in error["message"]
+
+
+async def test_a_stream_that_will_not_close_does_not_hang_the_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(service_module, "CLOSE_TIMEOUT_SECONDS", 0.05)
+    closed: list[str] = []
+
+    class Stuck:
+        def __init__(self) -> None:
+            self._chunks = [SimpleNamespace(content="只是文字。")]
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self._chunks:
+                raise StopAsyncIteration
+            return self._chunks.pop()
+
+        async def aclose(self) -> None:
+            closed.append("asked")
+            await asyncio.Event().wait()  # never returns
+
+    class LLM:
+        def astream(self, messages):
+            return Stuck()
+
+    async def factory(**kwargs):
+        return LLM()
+
+    monkeypatch.setattr(service_module.LLMService, "get_bisheng_llm", factory)
+    events = await asyncio.wait_for(run(prepare()), timeout=5)
+    assert closed == ["asked"]
+    assert of(events, "message")[0]["text"] == "只是文字。"
+
+
+async def test_the_cache_separates_tenant_views(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[Any] = []
+
+    async def default_model():
+        return 1, {1: resources_module.Resource(1, "通义千问")}
+
+    async def assistant():
+        return SimpleNamespace(llm_list=[])
+
+    async def knowledge(request, login_user, knowledge_type):
+        return []
+
+    class Tools:
+        def __init__(self, login_user):
+            calls.append(login_user.user_id)
+
+        async def get_tool_list(self, *args):
+            return []
+
+    monkeypatch.setattr(resources_module, "check_default_model", default_model)
+    monkeypatch.setattr(resources_module.LLMService, "get_assistant_llm", assistant)
+    monkeypatch.setattr(resources_module, "_knowledge", knowledge)
+    monkeypatch.setattr(resources_module, "ToolServices", Tools)
+    scope = [None]
+    monkeypatch.setattr(resources_module, "get_admin_scope_tenant_id", lambda: scope[0])
+    admin = SimpleNamespace(user_id=1, tenant_id=1)
+    await resources_module.load_catalogue(request=None, login_user=admin)
+    scope[0] = 7  # the same admin switched the management view
+    await resources_module.load_catalogue(request=None, login_user=admin)
+    assert calls == [1, 1]

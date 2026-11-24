@@ -80,6 +80,9 @@ MAX_CANVAS_EDGES = 2_000
 MAX_ANSWER_CHARS = 100_000
 #: One attempt's model call, start to last chunk (AC-27: a timeout is a failed turn, not a hang).
 MODEL_TIMEOUT_SECONDS = 180.0
+#: All attempts of one turn together; and the most a model stream's cleanup may take.
+TURN_TIMEOUT_SECONDS = 300.0
+CLOSE_TIMEOUT_SECONDS = 5.0
 #: How deep the answer's YAML may nest; nothing in a declaration comes close.
 MAX_YAML_DEPTH = 32
 
@@ -159,6 +162,7 @@ class WorkflowCopilotService:
                 user_id=turn.user_id,
             )
             messages = turn.messages
+            turn_deadline = asyncio.get_running_loop().time() + TURN_TIMEOUT_SECONDS
             for attempt in range(1, cls.MAX_ATTEMPTS + 1):
                 attempts = attempt
                 yield {"type": "status", "stage": "generating" if attempt == 1 else "retrying", "attempt": attempt}
@@ -167,8 +171,9 @@ class WorkflowCopilotService:
                 too_long = False
                 # The deadline guards only the awaits on the model, never a ``yield``: a
                 # timeout scope left open across a yield would fire in the consumer's frame.
-                deadline = asyncio.get_running_loop().time() + MODEL_TIMEOUT_SECONDS
-                chunks = llm.astream(_as_langchain(messages)).__aiter__()
+                deadline = min(asyncio.get_running_loop().time() + MODEL_TIMEOUT_SECONDS, turn_deadline)
+                stream = llm.astream(_as_langchain(messages))
+                chunks = stream.__aiter__()
                 try:
                     while True:
                         try:
@@ -199,10 +204,13 @@ class WorkflowCopilotService:
                     }
                     return
                 finally:
-                    aclose = getattr(chunks, "aclose", None)
+                    # Close what ``astream`` returned (its iterator may not be closable), and
+                    # bound the cleanup too: a hanging close must not outlive the deadline.
+                    aclose = getattr(stream, "aclose", None) or getattr(chunks, "aclose", None)
                     if aclose is not None:
                         with contextlib.suppress(Exception):
-                            await aclose()
+                            async with asyncio.timeout(CLOSE_TIMEOUT_SECONDS):
+                                await aclose()
 
                 if too_long:
                     outcome = "too_long"
@@ -226,6 +234,8 @@ class WorkflowCopilotService:
                         proposal, issues = _check(block, turn)
                     except RecursionError:
                         proposal, issues = {}, ["声明嵌套过深，无法处理"]
+                    except DslError as error:  # raised past compile (diff / merge): fed back like any issue
+                        proposal, issues = {}, [error.message]
                     if not issues:
                         outcome = "proposal"
                         yield {"type": "message", "text": reply}
@@ -263,6 +273,15 @@ def _check(block: str, turn: PreparedTurn) -> tuple[dict[str, Any], list[str]]:
         return {}, [f"YAML 格式错误{where}"]
     if not isinstance(spec, dict) or not isinstance(spec.get("nodes"), list):
         return {}, ["声明必须是一个映射，并且有 nodes 列表"]
+    seen: set[Any] = set()
+    repeated = []
+    for node in spec["nodes"]:
+        node_id = node.get("id") if isinstance(node, dict) else None
+        if node_id in seen and node_id not in repeated:
+            repeated.append(node_id)
+        seen.add(node_id)
+    if repeated:
+        return {}, [f"节点 id {i} 重复：每个节点的 id 必须唯一" for i in repeated]
     hidden = restore(spec, turn.base)
     if hidden:
         return {}, hidden
@@ -358,7 +377,7 @@ def _masked(delta: dict[str, Any]) -> dict[str, Any]:
                 if side not in entry:
                     continue
                 value = entry[side]
-                if is_sensitive(entry.get("key")) and not isinstance(value, dict | list) and value not in (None, ""):
+                if is_sensitive(entry.get("key")) and value not in (None, "", [], {}):
                     entry[side] = REDACTED
                 else:
                     entry[side] = mask(value)

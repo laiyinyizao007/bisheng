@@ -83,7 +83,7 @@ class WorkflowCopilotTurn(BaseModel):
 class WorkflowCopilotRequest(BaseModel):
     flow_id: str
     canvas: WorkflowCopilotCanvas
-    history: list[WorkflowCopilotTurn] = Field(default_factory=list, max_length=200)
+    history: list[WorkflowCopilotTurn] = Field(default_factory=list, max_length=50)
     message: str = Field(min_length=1, max_length=4_000)
 
 

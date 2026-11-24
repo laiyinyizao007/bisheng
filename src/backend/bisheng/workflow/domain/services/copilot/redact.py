@@ -26,15 +26,17 @@ from typing import Any
 
 REDACTED = "<已隐藏>"
 _MISSING = object()
+#: Matched anywhere in the key once case and separators are dropped (``accessToken``,
+#: ``x-api-key``, ``password_input``, ``pwd123``). ``tokens`` (as in ``max_tokens``) is a
+#: count, not a credential.
 _SENSITIVE = re.compile(
-    r"(?:^|[_\-.])(password|passwd|pwd|secret|token|api_?key|access_?key|secret_?key|private_?key"
-    r"|credentials?|authorization|cookie)$",
-    re.IGNORECASE,
+    r"password|passwd|pwd|secret|token(?!s)|apikey|accesskey|privatekey|credential|authorization|authheader|cookie"
 )
+_SEPARATORS = re.compile(r"[\s_\-.]+")
 
 
 def is_sensitive(key: Any) -> bool:
-    return isinstance(key, str) and bool(_SENSITIVE.search(key.strip()))
+    return isinstance(key, str) and bool(_SENSITIVE.search(_SEPARATORS.sub("", key).lower()))
 
 
 def _blank(value: Any) -> bool:
@@ -48,7 +50,7 @@ def _scrub(value: Any, replacement: Any) -> tuple[Any, int]:
         pair_key = value.get("key")
         for key, item in value.items():
             secret = is_sensitive(key) or (key == "value" and is_sensitive(pair_key))
-            if secret and not isinstance(item, dict | list) and not _blank(item):
+            if secret and not _blank(item) and not isinstance(item, bool):  # a structure under such a key goes whole
                 out[key] = replacement
                 count += 1
             else:
@@ -109,7 +111,12 @@ def _restore_in(container: Any, original: Any, node_id: Any, path: list[Any], is
             and (not isinstance(original, dict) or original.get("key") != container.get("key"))
         ):
             here = _MISSING  # a {key, value} pair moved or renamed: its secret does not follow
-        if value == REDACTED:
+        if isinstance(value, str) and value != REDACTED and REDACTED in value:
+            # Rewritten around the marker ("Bearer <已隐藏>"): landing it would replace the
+            # real value with this text, and the masked preview could not show the loss.
+            where = ".".join(str(p) for p in [*path, key])
+            issues.append(f"节点 {node_id} 的 {where} 改写了隐藏值 {REDACTED}：隐藏值只能整体原样保留，不能拼接或改写")
+        elif value == REDACTED:
             if here is _MISSING or here == REDACTED:
                 where = ".".join(str(p) for p in [*path, key])
                 issues.append(
@@ -131,8 +138,8 @@ def _original_at(original: Any, key: Any) -> Any:
 
 
 def _contains_redacted(value: Any) -> bool:
-    if value == REDACTED:
-        return True
+    if isinstance(value, str):
+        return REDACTED in value
     if isinstance(value, dict):
         return any(_contains_redacted(v) for v in value.values())
     if isinstance(value, list):

@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from bisheng.common.errcode.flow import WorkflowCopilotModelNotConfiguredError, WorkflowCopilotModelUnavailableError
-from bisheng.core.context.tenant import get_current_tenant_id
+from bisheng.core.context.tenant import get_admin_scope_tenant_id, get_current_tenant_id
 from bisheng.knowledge.domain.models.knowledge import KnowledgeTypeEnum
 from bisheng.knowledge.domain.services.knowledge_service import KnowledgeService
 from bisheng.llm.domain.const import LLMModelType
@@ -146,18 +146,21 @@ async def load_catalogue(*, request: Any, login_user: Any) -> Catalogue:
     )
 
 
-#: Tools and knowledge bases the user may use, per (tenant, user), kept briefly: a
-#: conversation sends several turns in a row and each listing pages through every
-#: knowledge base. A grant or revoke shows up within this many seconds; nothing is
-#: trusted from the cache that the platform does not check again on save and run.
-CATALOGUE_CACHE_SECONDS = 60.0
+#: Tools and knowledge bases the user may use, per tenant view and user, kept briefly:
+#: a conversation sends several turns in a row and each listing pages through every
+#: knowledge base. Accepted trade-off: a grant revoked within this window can still be
+#: proposed by name → id once; the proposal is only shown to that same user, who
+#: could already see the resource a moment ago, and nothing is saved until they do.
+CATALOGUE_CACHE_SECONDS = 30.0
 _CATALOGUE_CACHE_MAX = 256
-_catalogue_cache: dict[tuple[Any, Any], tuple[float, tuple[list[dict[str, Any]], list[Resource], list[Resource]]]] = {}
+_catalogue_cache: dict[tuple[Any, ...], tuple[float, tuple[list[dict[str, Any]], list[Resource], list[Resource]]]] = {}
 
 
 async def _usable_lists(request: Any, login_user: Any) -> tuple[list[dict[str, Any]], list[Resource], list[Resource]]:
     user_id = getattr(login_user, "user_id", None)
-    key = (get_current_tenant_id(), user_id)
+    # Every tenant view a listing may scope by: the resolved one (tools), the admin-scope
+    # override and the caller's own leaf tenant (knowledge goes by the request's user).
+    key = (get_current_tenant_id(), get_admin_scope_tenant_id(), getattr(login_user, "tenant_id", None), user_id)
     now = time.monotonic()
     hit = _catalogue_cache.get(key) if user_id is not None else None
     if hit is not None and now - hit[0] < CATALOGUE_CACHE_SECONDS:
