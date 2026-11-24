@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | ✅ 已拆解 | codex tasks 审查两轮；第二轮唯一的 high（AC-05 无保障）由用户选定「copilot 层走向检查」解决 |
-| 实现 | 🔄 进行中 | 12 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | 14 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -197,7 +197,7 @@
   **覆盖 AC**：AC-07、AC-22。超长报错对应 spec §3 边界情况，没有单独的 AC 编号
   **依赖**：T005、T007
 
-- [ ] **T013**: copilot 服务测试（先红，假模型）
+- [x] **T013**: copilot 服务测试（先红，假模型）
   **文件**：
   - `src/backend/test/workflow/copilot/test_service.py`
   - `src/backend/test/workflow/copilot/conftest.py`：脚本化假模型夹具，T015 共用
@@ -215,7 +215,7 @@
   **覆盖 AC**：AC-03、AC-05、AC-06、AC-10、AC-12、AC-13、AC-25、AC-27
   **依赖**：T009、T011、T012
 
-- [ ] **T014**: copilot 服务实现
+- [x] **T014**: copilot 服务实现
   **文件**：`src/backend/bisheng/workflow/domain/services/copilot/service.py`
   **逻辑**：design 决策 2、6、7。模型调用在生成器内直接 await，不放线程。
   **测试**：T013 全部通过
