@@ -1,0 +1,62 @@
+name: Backend Quality
+
+# Test gate for src/backend/. Until this file, no workflow ran the backend pytest
+# suite at all (test.yml / ci.yml only build images).
+#
+# Named files, not the whole suite: the full suite has never run in CI and its state
+# is unknown, and a gate that starts red guards nothing. The list is the F005
+# (workflow-as-code) suites; grow it as other suites are brought to green, never
+# shrink it.
+#
+# The frontend `workflow.ts` is in the trigger paths on purpose:
+# test_node_templates.py guards that the frontend keeps no copy of the node
+# templates, so an edit there must re-run it.
+
+on:
+  pull_request:
+    paths:
+      - "src/backend/**"
+      - "src/frontend/platform/src/controllers/API/workflow.ts"
+      - ".github/workflows/backend-quality.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (workflow-as-code)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # 3.11: the `sync` dependency fails to build on 3.12 (it imports `imp`).
+      - name: Sync (frozen)
+        run: uv sync --frozen --python 3.11 --extra test
+
+      # bisheng/config.yaml is gitignored but read at import time. An empty mapping
+      # is enough: every Settings field has a default (database falls back to sqlite).
+      # Never the docker config: its `!env ${...}` tags raise when the variable is unset.
+      - name: Minimal config
+        run: echo '{}' > bisheng/config.yaml
+
+      - name: Tests
+        run: >-
+          uv run pytest -q
+          test/workflow/test_node_templates.py
+          test/workflow/test_tool_node_template.py
+          test/open_api/test_scopes.py
+          test/open_api/test_tools_v2.py
+          test/open_api/test_workflow_write_v2.py
+          test/open_api/test_workflow_invoke_failed_node.py
+          test/open_api/test_openapi_schema_contract.py

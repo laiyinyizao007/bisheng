@@ -48,10 +48,43 @@ OPEN_API_SCOPES: tuple[OpenApiScope, ...] = (
     ),
     OpenApiScope(
         "workflow:read",
-        (("GET", f"{_V2}/flows/{{flow_id}}"),),
+        (
+            ("GET", f"{_V2}/flows/{{flow_id}}"),
+            # F005 workflow-as-code: node templates for the CLI. A static read,
+            # but it lives behind the key-auth wall so the template catalogue is
+            # not an anonymous surface.
+            ("GET", f"{_V2}/flow/node_templates"),
+            # F005 workflow-as-code: version reads are the diff baseline —
+            # "what does the online side actually look like" needs arbitrary
+            # versions, not just the current one mirrored into ``Flow.data``.
+            ("GET", f"{_V2}/flows/{{flow_id}}/versions"),
+            ("GET", f"{_V2}/flows/{{flow_id}}/versions/{{version_id}}"),
+            # Registered tools, so the compiler can reference one by operationId.
+            ("GET", f"{_V2}/tools"),
+        ),
         "app",
         "openApiManagement.scopes.workflow_read.label",
         "openApiManagement.scopes.workflow_read.desc",
+    ),
+    # F005 workflow-as-code: the write face behind ``bisheng flow push`` /
+    # ``bisheng flow tool register``. Deliberately a separate scope from
+    # ``workflow:read`` — a key that may build a diff report must not
+    # automatically be able to push new versions. Mode S only (INV-31 shape):
+    # a delegated key writing in somebody else's name is exactly the
+    # impersonation entry AC-42 forbids.
+    OpenApiScope(
+        "workflow:write",
+        (
+            ("POST", f"{_V2}/flows"),
+            ("POST", f"{_V2}/flows/{{flow_id}}/versions"),
+            ("PUT", f"{_V2}/flows/{{flow_id}}/versions/{{version_id}}"),
+            ("POST", f"{_V2}/flows/{{flow_id}}/versions/{{version_id}}/activate"),
+            ("POST", f"{_V2}/tools"),
+            ("POST", f"{_V2}/tools/schema"),
+        ),
+        "app",
+        "openApiManagement.scopes.workflow_write.label",
+        "openApiManagement.scopes.workflow_write.desc",
     ),
     OpenApiScope(
         "assistant:invoke",

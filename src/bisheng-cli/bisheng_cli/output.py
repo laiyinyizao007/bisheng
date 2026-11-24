@@ -55,6 +55,11 @@ _MASK_PATTERNS = (
     (re.compile(r"(bs-(?:sak|pat)-)[A-Za-z0-9_\-]+"), r"\1****"),
     (re.compile(r"(?i)(authorization\W{0,4}bearer)\s+\S+"), r"\1 ****"),
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9_\-\.]{8,}"), "Bearer ****"),
+    # Model-provider keys (`sk-…`, incl. `sk-proj-…`). `flow diff` / `push` print
+    # parameter values read back from the platform, and a key pasted into a
+    # prompt or a node setting would otherwise go to the terminal and `--json`.
+    # Twenty characters after the prefix keeps words like `sk-learn` readable.
+    (re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}"), "sk-****"),
 )
 
 _MILESTONES = (25, 50, 75, 100)
@@ -189,6 +194,24 @@ class Emitter:
                 "failure": failure,
             }
         )
+
+    def event(self, command: str, name: str, **fields: Any) -> None:
+        """A machine event of a kind other than stage / progress / result (e.g. ``flow_event``)."""
+        if name == "result":
+            raise ValueError("result has its own method: exactly one per run")
+        self._emit({"event": name, "command": command, "ts": _now(), **fields})
+
+    def output(self, text: str) -> None:
+        """The command's product on stdout — outside ``--json`` only.
+
+        ``bisheng flow compile`` prints a definition the way ``cat`` prints a
+        file, so it can be redirected. Under ``--json`` stdout is NDJSON and
+        nothing else, and the product travels in the ``result`` event instead.
+        """
+        if self.json_mode:
+            return
+        self._stdout.write(mask(text) + "\n")
+        self._stdout.flush()
 
     @property
     def result_emitted(self) -> bool:

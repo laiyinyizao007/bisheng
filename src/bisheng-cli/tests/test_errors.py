@@ -20,7 +20,9 @@ from bisheng_cli.errors import (
     EXIT_LOCAL_INVALID,
     EXIT_NOT_ENABLED,
     EXIT_PRECHECK_FAILED,
+    EXIT_PUBLISH_CONFLICT,
     EXIT_SCENE_MISSING,
+    EXIT_SECRET_FOUND,
     EXIT_UNKNOWN_CODE,
     EXIT_UNREACHABLE,
     CliError,
@@ -349,3 +351,71 @@ def test_legacy_runtime_failure_offers_startup_troubleshooting_without_losing_or
     err = _err(16124, "failed")
     assert "启动命令" in err.next_step and "监听地址" in err.next_step and "端口" in err.next_step
     assert err.as_failure()["code"] == 16124
+
+
+# ---------------------------------------------------------------------------
+# F005 T040 — the workflow (105) segment.
+# ---------------------------------------------------------------------------
+
+#: The table as it stood before the 105 segment was added. A new segment that
+#: re-points an existing code changes another command's exit code under it.
+_BEFORE_105 = {
+    16233: EXIT_LOCAL_INVALID, 26001: EXIT_AUTH, 26002: EXIT_AUTH, 26027: EXIT_AUTH, 26003: EXIT_FORBIDDEN,
+    26004: EXIT_DEFECT, 26016: EXIT_FORBIDDEN, 26051: EXIT_FORBIDDEN, 26040: EXIT_FORBIDDEN, 26043: EXIT_AUTH,
+    26030: EXIT_UNREACHABLE, 26031: EXIT_DEFECT, 16101: EXIT_LOCAL_INVALID, 16121: EXIT_UNREACHABLE,
+    16125: EXIT_CAPACITY, 16201: EXIT_LOCAL_INVALID, 16202: EXIT_LOCAL_INVALID, 16203: EXIT_LOCAL_INVALID,
+    16103: EXIT_PUBLISH_CONFLICT, 16205: EXIT_PUBLISH_CONFLICT, 16207: EXIT_NOT_ENABLED,
+    16221: EXIT_PRECHECK_FAILED, 16222: EXIT_PRECHECK_FAILED, 16223: EXIT_PRECHECK_FAILED,
+    16224: EXIT_PRECHECK_FAILED, 16124: EXIT_PRECHECK_FAILED, 16227: EXIT_PRECHECK_FAILED,
+    16228: EXIT_PRECHECK_FAILED, 16230: EXIT_PRECHECK_FAILED, 16231: EXIT_PRECHECK_FAILED,
+    16232: EXIT_PRECHECK_FAILED, 16241: EXIT_SECRET_FOUND, 16225: EXIT_SCENE_MISSING, 16226: EXIT_CAPACITY,
+    16229: EXIT_PUBLISH_CONFLICT, 16251: EXIT_PUBLISH_CONFLICT, 16252: EXIT_PUBLISH_CONFLICT,
+    16254: EXIT_PUBLISH_CONFLICT,
+}  # fmt: skip
+#: sha256 over ``sorted(ERROR_HINTS.items())`` for those same codes, before the 105 segment.
+_HINTS_BEFORE_105 = "90616126880ce87bdce00254384395ebc15b69fcd5d54d25abbc0122d336d9ea"
+
+
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        (10525, EXIT_PRECHECK_FAILED),
+        (10529, EXIT_PUBLISH_CONFLICT),
+        (10502, EXIT_PUBLISH_CONFLICT),
+        (10500, EXIT_LOCAL_INVALID),
+        (10543, EXIT_LOCAL_INVALID),
+        (10599, EXIT_FORBIDDEN),
+    ],
+)
+def test_flow_error_codes_mapped(code: int, expected: int) -> None:
+    err = _err(code, "platform words")
+    assert ERROR_EXIT_CODES[code] == expected
+    assert err.exit_code == expected and err.code == code
+    assert err.message != f"平台返回未登记的错误码 {code}"
+    assert err.next_step.strip()
+    # The platform's own message survives next to the translation.
+    assert err.as_failure()["message"] == "platform words"
+
+
+def test_online_workflow_says_take_it_offline() -> None:
+    err = _err(10525, "Workflow is live and not editable")
+    assert "下线" in err.next_step
+
+
+def test_missing_scope_hint_preserved() -> None:
+    err = _err(26003, "scope missing", details={"exception": "x", "required": "workflow:write"})
+    assert err.exit_code == EXIT_FORBIDDEN
+    assert "workflow:write" in err.next_step
+    assert err.message == "这把密钥缺少本次操作需要的权限位"
+
+
+def test_existing_mappings_unchanged() -> None:
+    import hashlib
+    import json
+
+    assert {code: ERROR_EXIT_CODES[code] for code in _BEFORE_105} == _BEFORE_105
+    hints = sorted((code, ERROR_HINTS[code]) for code in _BEFORE_105)
+    digest = hashlib.sha256(json.dumps([[c, list(h)] for c, h in hints], ensure_ascii=False).encode()).hexdigest()
+    assert digest == _HINTS_BEFORE_105
+    added = set(ERROR_EXIT_CODES) - set(_BEFORE_105)
+    assert added == {10525, 10529, 10502, 10500, 10543, 10599}

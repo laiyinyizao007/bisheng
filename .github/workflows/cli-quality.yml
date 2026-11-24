@@ -38,6 +38,11 @@ jobs:
 
       # --frozen, not a plain sync: uv.lock is committed, and CI must use it
       # rather than re-resolving. Same rule as src/backend/Dockerfile.
+      # --frozen trusts uv.lock without comparing it to pyproject.toml, so a stale
+      # lock would pass unnoticed (it did: the version bump to 3.0.0.post2).
+      - name: Lock is in sync with pyproject
+        run: uv lock --check
+
       - name: Sync (frozen)
         run: uv sync --frozen --extra dev
 

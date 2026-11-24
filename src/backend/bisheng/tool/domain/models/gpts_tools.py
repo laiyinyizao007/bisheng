@@ -142,6 +142,36 @@ class GptsToolsRead(GptsToolsBase):
     id: int
 
 
+class GptsToolsWithNodeTemplate(GptsToolsRead):
+    """Non-table read model: one tool in a list response, plus its workflow node template.
+
+    F005: ``GET /api/v2/tools`` (and the v1 list it shares the assembly with)
+    attach ``node_template`` to every child — the tool list is then the single
+    source a consumer needs to render/compile tool nodes. FastAPI only
+    serializes **declared** fields, so the template must be declared here, not
+    monkey-patched onto ``GptsTools`` rows.
+    """
+
+    # ``extra`` 与 ``id`` 是表模型 (``GptsTools``) 上的字段而非 Base 上的——清单
+    # 序列化此前经由表模型行, 读模型要逐字段对齐, 不能在这里悄悄少列。
+    extra: str | dict | None = Field(default=None, description="Tool configuration extras")
+    node_template: dict | None = Field(default=None, description="Workflow tool-node template generated from this tool")
+
+
+class GptsToolsTypeListItem(GptsToolsTypeRead):
+    """Read-only list item: a tool type whose children carry ``node_template``.
+
+    Kept separate from ``GptsToolsTypeRead`` on purpose: that model is also the
+    **write** body of ``POST/PUT /api/v1/tool`` and ``POST /api/v2/tools``, and
+    the DAO ``session.add``s its children directly — they must stay mapped
+    ``GptsTools`` rows. Only the list response uses this subclass.
+    """
+
+    children: list[GptsToolsWithNodeTemplate] | None = Field(
+        default_factory=list, description="List of tools under the Tools category, each with its node template"
+    )
+
+
 class GptsToolsDao(GptsToolsBase):
     @classmethod
     def insert(cls, obj: GptsTools):

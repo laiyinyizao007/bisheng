@@ -62,3 +62,13 @@ jobs:
 
       - name: Typecheck client (strict, non-exempted files)
         run: pnpm --filter bishengchat typecheck
+
+      # Named files, not the whole suite: platform vitest carries ~40 pre-existing
+      # failures unrelated to workflows, and a gate that is always red guards nothing.
+      # Grow this list as suites are brought to green; never shrink it.
+      - name: Platform unit tests (node / tool templates come from the backend)
+        run: >-
+          pnpm --filter bisheng exec vitest run
+          src/controllers/API/workflow.test.ts
+          src/util/flowUtils.toolTree.test.ts
+          src/pages/BuildPage/flow/Sidebar.templates.test.tsx

@@ -68,7 +68,9 @@ const ToolItem = ({ temp, index, dropdown, onDragStart, onClick }) => {
 
 export default function Sidebar({ dropdown = false, disabledNodes = [], onInitStartNode = (node: any) => { }, onClick = (k) => { } }) {
     const { t } = useTranslation('flow')
-    const { data: tempData, refetch } = useQuery({
+    // Templates come only from the backend (F005): a failed fetch is shown as a failure,
+    // never as an empty node library.
+    const { data: tempData, refetch, error: templatesError } = useQuery({
         queryKey: ["QueryWorkFlowTempKey"],
         queryFn: () => getWorkflowNodeTemplate(),
         cacheTime: 0
@@ -127,6 +129,7 @@ export default function Sidebar({ dropdown = false, disabledNodes = [], onInitSt
             return list
         }, [])
     }, [toolTempData])
+    const unavailableTools = useMemo(() => toolTemps.flatMap(temp => temp.unavailable), [toolTemps])
 
     const [expand, setExpand] = useState(true)
     const [activeTab, setActiveTab] = useState('base')
@@ -162,6 +165,10 @@ export default function Sidebar({ dropdown = false, disabledNodes = [], onInitSt
                 </div>
                 {/* base */}
                 {activeTab === 'base' && <div>
+                    {templatesError && <div role="alert" className="p-2 text-sm text-red-500">
+                        <p>{t('nodeTemplatesLoadFailed', { reason: templatesError instanceof Error ? templatesError.message : String(templatesError) })}</p>
+                        <Button size="small" variant="text" onClick={() => refetch()}>{t('retry')}</Button>
+                    </div>}
                     <>{
                             nodeTemps.map((item, index) =>
                                 <SharedTooltip key={item.type} side="right" content={<><div className="max-w-96 text-left break-all whitespace-normal">{item.desc}</div></>}><span tabIndex={0} className="block w-full"><div key={item.type}
@@ -200,6 +207,9 @@ export default function Sidebar({ dropdown = false, disabledNodes = [], onInitSt
                 </div>}
                 {/* tool */}
                 {activeTab === 'tool' && <div className="nowheel overflow-y-auto h-[calc(100vh-10rem)] max-w-44 relative">
+                    {unavailableTools.length > 0 && <p role="alert" className="p-2 text-sm text-red-500">
+                        {t('toolTemplatesUnavailable', { names: unavailableTools.join(', ') })}
+                    </p>}
                     <Accordion type="multiple" className="w-full">
                         <>{toolTemps.map((temp, index) =>
                                 <ToolItem

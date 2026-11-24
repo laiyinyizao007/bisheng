@@ -93,6 +93,22 @@ def test_generated_customer_contract_matches_registered_v2_http_routes():
     assert "input" in workflow_properties
 
 
+def test_f005_node_templates_contract_block_is_exact():
+    """F005 的 path 块与真实 OpenAPI **逐字段相等**——含 description。
+
+    上一条测试只比较 operation 集与 security。summary/description 这类
+    metadata 漂移不会变红——第二轮审查实测抓到过 description 只剩旧一行。
+    这里对本 feature 拥有的 path 做整块比对——堵住那个缝。
+    """
+    contract_path = (
+        Path(__file__).resolve().parents[4]
+        / "features/v3.0.0-beta1/053-openapi-auth-and-identity/openapi-v2-key-auth-api.json"
+    )
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    target = "/api/v2/flow/node_templates"
+    assert contract["paths"][target] == app.openapi()["paths"][target]
+
+
 def _collect_refs(value):
     if isinstance(value, dict):
         refs = [value["$ref"]] if isinstance(value.get("$ref"), str) else []

@@ -75,46 +75,23 @@ export function initNode(node, nds, t) {
     return node;
 }
 
-// 工具节点tree
+// Tool node tree. Each child's node template is built by the backend (F005 AC-04):
+// the editor passes it through instead of assembling its own copy of the shape.
+// Children without one are left out and named in `unavailable`, so the tool panel can say so.
 export function getToolTree(temp) {
-    const children = temp.children.map(item => {
-        return {
-            id: item.id,
-            tool_key: item.tool_key,
-            type: 'tool',
-            name: item.name,
-            description: item.desc,
-            group_params: [
-                {
-                    name: '工具参数',
-                    params: item.api_params.map(el => ({
-                        key: el.name,
-                        label: el.name,
-                        type: 'var_textarea',
-                        test: "input",
-                        desc: el.description,
-                        required: el.required,
-                        value: ''
-                    }))
-                },
-                {
-                    name: '输出',
-                    params: [{
-                        global: 'key',
-                        key: 'output',
-                        label: '输出变量',
-                        type: 'var',
-                        value: ''
-                    }]
-                }
-            ]
-        }
-    })
+    const unavailable = []
+    const children = temp.children.filter(item => {
+        if (item.node_template) return true
+        console.error(`tool ${item.name} has no node_template from the backend; it is left out of the tool list`)
+        unavailable.push(item.name)
+        return false
+    }).map(item => item.node_template)
 
     return {
         name: temp.name,
         is_preset: temp.is_preset,
-        children: children
+        children: children,
+        unavailable
     }
 }
 
@@ -364,7 +341,7 @@ export function importFlow() {
                         const flow = JSON.parse(text);
 
                         if (!flow || !Array.isArray(flow.nodes)) {
-                            return reject("flow.nodes 不存在或不是数组");
+                            return reject("flow.nodes is missing or not an array");
                         }
                         // 使用 Promise.all 等待所有的 copyReportTemplate 完成
                         await Promise.all(flow.nodes.map(async (node) => {

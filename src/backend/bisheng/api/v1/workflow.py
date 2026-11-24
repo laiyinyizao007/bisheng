@@ -5,7 +5,6 @@ import jwt
 from fastapi import APIRouter, Body, Depends, Query, Request, WebSocket, WebSocketException
 from fastapi import status as http_status
 from loguru import logger
-from sqlmodel import select
 
 from bisheng.api.services import report_template
 from bisheng.api.services.flow import FlowService
@@ -16,16 +15,14 @@ from bisheng.api.v1.schemas import FlowVersionCreate, resp_200
 from bisheng.common.chat.types import WorkType
 from bisheng.common.constants.enums.telemetry import BaseTelemetryTypeEnum
 from bisheng.common.dependencies.user_deps import UserPayload
-from bisheng.common.errcode.flow import AppWriteAuthError, WorkflowNameExistsError, WorkFlowOnlineEditError
+from bisheng.common.errcode.flow import AppWriteAuthError, WorkFlowOnlineEditError
 from bisheng.common.errcode.http_error import NotFoundError, ServerError, UnAuthorizedError
 from bisheng.common.services import telemetry_service
 from bisheng.common.services.config_service import settings as bisheng_settings
-from bisheng.core.database import get_sync_db_session
 from bisheng.core.logger import trace_id_var
 from bisheng.core.storage.minio.minio_manager import get_minio_storage
 from bisheng.database.models.assistant import AssistantDao
-from bisheng.database.models.flow import Flow, FlowCreate, FlowDao, FlowRead, FlowStatus, FlowType, FlowUpdate
-from bisheng.database.models.flow_version import FlowVersionDao
+from bisheng.database.models.flow import FlowCreate, FlowDao, FlowStatus, FlowType, FlowUpdate
 from bisheng.permission.application.business_authorization import (
     check_business_action,
     require_business_action,
@@ -34,6 +31,7 @@ from bisheng.role.domain.services.quota_service import QuotaResourceType, requir
 from bisheng.share_link.api.dependencies import header_share_token_parser
 from bisheng.share_link.domain.models.share_link import ShareLink
 from bisheng.utils import generate_uuid
+from bisheng.workflow.common.node_templates import NODE_TEMPLATES
 from bisheng_langchain.utils.requests import Requests
 
 router = APIRouter(prefix="/workflow", tags=["Workflow"])
@@ -51,6 +49,18 @@ FORCE_SAVE_ERROR_MESSAGES = {
 # "No changes since the last save" -- nothing to flush, so the template on
 # storage already matches what the user sees. Report it as saved, not failed.
 FORCE_SAVE_NO_CHANGES = 4
+
+
+@router.get("/node_templates")
+async def get_node_templates(
+    login_user: UserPayload = Depends(UserPayload.get_login_user),
+):
+    """工作流节点模板——12 类节点的模板定义。
+
+    模板由后端持有——``bisheng.workflow.common.node_templates``——前端与命令行工具
+    从这里取同一份数据。响应里只有结构与参数键——界面文案由前端本地化资源提供。
+    """
+    return resp_200(data=NODE_TEMPLATES)
 
 
 @router.get("/write/auth")
@@ -423,35 +433,14 @@ async def create_flow(
     flow: FlowCreate,
     login_user: UserPayload = Depends(UserPayload.get_app_creator_user),
 ):
-    """Create a new flow."""
-    # Determine if the user repeats the skill name
-    with get_sync_db_session() as session:
-        if session.exec(
-            select(Flow)
-            .where(Flow.is_delete == 0)
-            .where(
-                Flow.name == flow.name, Flow.flow_type == FlowType.WORKFLOW.value, Flow.user_id == login_user.user_id
-            )
-        ).first():
-            raise WorkflowNameExistsError.http_exception()
-    flow.user_id = login_user.user_id
-    db_flow = Flow.model_validate(flow)
-    # Defense-in-depth: Flow.tenant_id default is None and the framework's
-    # before_flush hook (bisheng.core.database.tenant_filter) auto-fills it
-    # from current_tenant_id. Keeping this explicit assignment so future
-    # callers without an HTTP middleware (CLI, scripts) still set it right.
-    db_flow.tenant_id = login_user.tenant_id
-    db_flow.create_time = None
-    db_flow.update_time = None
-    db_flow.flow_type = FlowType.WORKFLOW.value
-    # Create New Skill
-    db_flow = FlowDao.create_flow(db_flow, FlowType.WORKFLOW.value)
+    """Create a new flow.
 
-    current_version = FlowVersionDao.get_version_by_flow(db_flow.id)
-    ret = FlowRead.model_validate(db_flow)
-    ret.version_id = current_version.id
-    await FlowService.create_flow_hook(request, login_user, db_flow)
-    return resp_200(data=ret)
+    The body lives in ``FlowService.create_workflow`` — v2 ``POST /api/v2/flows``
+    (F005) delegates to the same method, so the duplicate-name check and the
+    owner/tenant stamping cannot drift between the two write faces. What this
+    endpoint still owns is **who** may call it: the create-app gate and quota.
+    """
+    return await FlowService.create_workflow(request, login_user, flow)
 
 
 @router.get("/versions", status_code=200)

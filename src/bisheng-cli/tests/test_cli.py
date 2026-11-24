@@ -35,7 +35,7 @@ def _all_option_strings(parser) -> set[str]:
 def test_help_lists_registered_commands() -> None:
     parser = build_parser()
     names = {name for name, _ in _subparser_actions(parser)}
-    assert names == {"login", "deploy", "logs", "skills", "dev", "platforms", "init"} == set(SUBCOMMANDS)
+    assert names == {"login", "deploy", "logs", "skills", "dev", "platforms", "init", "flow"} == set(SUBCOMMANDS)
 
 
 def test_help_footer_declares_deferred_commands() -> None:
@@ -237,3 +237,101 @@ def test_global_flags_accepted_before_and_after_the_subcommand() -> None:
     bare = parser.parse_args(["logs"])
     assert bare.json_mode is False and bare.verbose is False
     assert bare.quiet is False and bare.timeout is None and bare.no_proxy is False
+
+
+# ---------------------------------------------------------------------------
+# F005 T016 — command-family contract, parametrised over every registered leaf.
+#
+# Written against the parser itself rather than a hand-kept list, so a new
+# command (the `flow` family lands in a later wave) is covered the moment it is
+# registered — and a leaf that forgets the global-flag mirror fails here.
+# ---------------------------------------------------------------------------
+
+_GLOBAL_FLAGS = ("--json", "--verbose", "--quiet", "--timeout", "--no-proxy", "--platform")
+
+
+def _walk(parser, path=()):
+    """Yield ``(path, parser)`` for every parser below the root, depth first."""
+    for name, sub in _subparser_actions(parser):
+        yield (*path, name), sub
+        yield from _walk(sub, (*path, name))
+
+
+def _required_positionals(parser) -> list[str]:
+    return [
+        "http://p.test"
+        for action in parser._actions
+        if not action.option_strings
+        and action.nargs is None
+        and not (hasattr(action, "choices") and isinstance(action.choices, dict))
+    ]
+
+
+def _argv_for(path) -> list[str]:
+    """Argv reaching the parser at ``path``, with placeholders for required positionals."""
+    argv: list[str] = []
+    node = build_parser()
+    for name in path:
+        node = dict(_subparser_actions(node))[name]
+        argv.append(name)
+        argv.extend(_required_positionals(node))
+    return argv
+
+
+_NODES = [path for path, _ in _walk(build_parser())]
+
+
+@pytest.mark.parametrize("path", _NODES, ids=" ".join)
+def test_every_leaf_mirrors_global_flags(path) -> None:
+    node = build_parser()
+    for name in path:
+        node = dict(_subparser_actions(node))[name]
+    options = {s for a in node._actions for s in a.option_strings}
+    missing = [flag for flag in _GLOBAL_FLAGS if flag not in options]
+    assert not missing, f"{' '.join(path)} is missing mirrored global flags: {missing}"
+
+
+@pytest.mark.parametrize("path", _NODES, ids=" ".join)
+def test_flag_order_is_equivalent(path) -> None:
+    parser = build_parser()
+    argv = _argv_for(path)
+    before = parser.parse_args(["--json", "--platform", "http://x.test", *argv])
+    after = parser.parse_args([*argv, "--json", "--platform", "http://x.test"])
+    assert before.json_mode is after.json_mode is True
+    assert before.platform == after.platform == "http://x.test"
+    bare = parser.parse_args(argv)
+    assert bare.json_mode is False and bare.platform is None  # SUPPRESS keeps the root default
+
+
+def test_no_subcommand_is_a_stub() -> None:
+    """Every registered top-level command resolves to a real, importable handler."""
+    from bisheng_cli.main import _HANDLER_PATHS, resolve_handler
+
+    registered = {name for name, _ in _subparser_actions(build_parser())}
+    assert registered == set(SUBCOMMANDS) == set(_HANDLER_PATHS)
+    for name in SUBCOMMANDS:
+        assert callable(resolve_handler(name)), name
+
+
+def _emit_twice(_args, emitter) -> int:
+    # Handlers like `skills sync` emit their own (richer) result; main emits again.
+    emitter.result("x", ok=True, exit_code=0, data={"from": "handler"})
+    return 0
+
+
+def _raise_cli_error(_args, _emitter) -> int:
+    raise CliError("坏了", exit_code=6)
+
+
+@pytest.mark.parametrize("command", SUBCOMMANDS)
+@pytest.mark.parametrize(
+    "handler",
+    [lambda _a, _e: 0, lambda _a, _e: EXIT_USAGE, _emit_twice, _raise_cli_error, _boom],
+    ids=["success", "failure-code", "handler-emits-result", "cli-error", "crash"],
+)
+def test_exactly_one_result_event(command, handler) -> None:
+    out = io.StringIO()
+    run(["--json", *_argv_for((command,))], handlers={command: handler}, stdout=out, stderr=io.StringIO())
+    events = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    assert [e["event"] for e in events].count("result") == 1
+    assert events[-1]["event"] == "result"

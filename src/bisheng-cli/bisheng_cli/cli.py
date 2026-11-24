@@ -22,11 +22,11 @@ from collections.abc import Callable
 from bisheng_cli import __version__
 from bisheng_cli.errors import EXIT_USAGE, CliError
 
-SUBCOMMANDS = ("init", "login", "deploy", "logs", "skills", "dev", "platforms")
+SUBCOMMANDS = ("init", "login", "deploy", "logs", "skills", "dev", "platforms", "flow")
 DEFERRED_COMMANDS: tuple[str, ...] = ()
 
 _EPILOG = (
-    "命令: login / deploy / logs / skills sync / dev / platforms。\n"
+    "命令: login / deploy / logs / skills sync / dev / platforms / flow。\n"
     "目标平台: 默认是最近一次 login 的平台；--platform <地址> 指定另一个已登录的平台，"
     "bisheng platforms use <地址> 切换默认。\n"
     "机器可读输出: 加 --json，NDJSON 走 stdout、人读文本走 stderr，最后一行恒为 result 事件。"
@@ -164,13 +164,100 @@ def build_parser() -> argparse.ArgumentParser:
     platforms_use = platforms_sub.add_parser("use", help="把某个已登录的平台设为默认")
     platforms_use.add_argument("base_url", metavar="BASE_URL", help="已登录过的平台地址")
 
+    flow_leaves = _add_flow(subparsers)
+
     # Every leaf that can receive a flag needs the mirror, or `--json` after it
     # is "unrecognized arguments". `sync` is where `bisheng skills sync --json`
     # lands; `skills` covers `bisheng skills --json sync`.
-    for subparser in (init, login, deploy, logs, skills, sync, dev, platforms, platforms_list, platforms_use):
+    for subparser in (
+        init,
+        login,
+        deploy,
+        logs,
+        skills,
+        sync,
+        dev,
+        platforms,
+        platforms_list,
+        platforms_use,
+        *flow_leaves,
+    ):
         _add_global_flags(subparser, mirror=True)
 
     return parser
+
+
+def _add_flow(subparsers: argparse._SubParsersAction) -> list[argparse.ArgumentParser]:
+    """`bisheng flow <verb>` (F005). Returns every parser that needs the global-flag mirror.
+
+    Two- and three-token, like `skills` / `platforms`: `flow` carries the verb,
+    `flow tool` carries register / list. No flag names another identity (AC-42):
+    every write is made as the key's own resource owner.
+    """
+    flow = subparsers.add_parser("flow", help="工作流即代码：编译 / 对比 / 推送 / 运行 YAML 声明的工作流，注册工具")
+    verbs = flow.add_subparsers(dest="flow_command", metavar="{compile,diff,push,run,tool}")
+    spec_help = "工作流声明文件（YAML）；工作流绑定记在它旁边的 .bisheng/flow.json"
+    overlay_help = "Python 覆盖层：只能改已声明参数的取值、追加未声明的节点与连线"
+
+    compile_ = verbs.add_parser("compile", help="把声明编译成平台工作流定义并做结构校验（只读，不写平台）")
+    compile_.add_argument("spec", metavar="SPEC", help=spec_help)
+    compile_.add_argument("--overlay", default=None, help=overlay_help)
+    compile_.add_argument("--out", default=None, help="把定义写到这个文件（默认打印到标准输出）")
+
+    diff = verbs.add_parser("diff", help="对比本地声明与线上工作流（默认线上当前版本）")
+    diff.add_argument("spec", metavar="SPEC", help=spec_help)
+    diff.add_argument("--overlay", default=None, help=overlay_help)
+    diff.add_argument(
+        "--flow-id", dest="flow_id", default=None, help="目标工作流 id（默认取 .bisheng/flow.json 的绑定）"
+    )
+    baseline = diff.add_mutually_exclusive_group()
+    baseline.add_argument("--version-id", dest="version_id", default=None, help="以这个历史版本为对比基准")
+    baseline.add_argument("--list-versions", dest="list_versions", action="store_true", help="只列出工作流的版本")
+
+    push = verbs.add_parser("push", help="为工作流新建一个版本承载本地定义，并切为当前版本")
+    push.add_argument("spec", metavar="SPEC", help=spec_help)
+    push.add_argument("--overlay", default=None, help=overlay_help)
+    target = push.add_mutually_exclusive_group()
+    target.add_argument(
+        "--flow-id", dest="flow_id", default=None, help="目标工作流 id（默认取 .bisheng/flow.json 的绑定）"
+    )
+    target.add_argument("--create", action="store_true", help="在平台上新建工作流（名称与描述取自声明）并绑定")
+    push.add_argument("--name", default=None, help="新版本的名称（默认 cli-<时间>）")
+    push.add_argument("--description", default=None, help="新版本的描述")
+    push.add_argument(
+        "--allow-drop-online-only",
+        dest="allow_drop_online_only",
+        action="store_true",
+        help="线上有本地没有的内容时也推送（它们保留在旧版本里）；非交互环境下必须显式带上",
+    )
+    push.add_argument("--no-activate", dest="no_activate", action="store_true", help="只建版本，不切为当前版本")
+
+    run = verbs.add_parser("run", help="运行线上工作流，呈现事件流；停在等待输入时接受输入续跑")
+    run.add_argument("spec", metavar="SPEC", help=spec_help)
+    run.add_argument(
+        "--flow-id", dest="flow_id", default=None, help="目标工作流 id（默认取 .bisheng/flow.json 的绑定）"
+    )
+    one_shot = run.add_mutually_exclusive_group()
+    one_shot.add_argument("--input", default=None, help="一次性输入：用于下一次等待输入（单字段）")
+    one_shot.add_argument("--input-file", dest="input_file", default=None, help="同 --input，从 UTF-8 文本文件读取")
+    one_shot.add_argument("--input-json", dest="input_json", default=None, help="按字段给值的 JSON 对象（表单输入用）")
+    run.add_argument("--resume", default=None, help="上一次运行停住时给出的续跑凭据")
+    run.add_argument(
+        "--wait-timeout",
+        dest="wait_timeout",
+        type=float,
+        default=None,
+        help="等平台发来下一个事件的最长秒数（默认 240）",
+    )
+
+    tool = verbs.add_parser("tool", help="注册 / 列出工作流可引用的自定义工具")
+    tool_verbs = tool.add_subparsers(dest="tool_command", metavar="{register,list}")
+    register = tool_verbs.add_parser("register", help="按 OpenAPI 描述注册工具类型，报出各操作标识")
+    register.add_argument("openapi", metavar="OPENAPI", help="OpenAPI 描述文件（YAML 或 JSON）")
+    register.add_argument("--name", default=None, help="工具类型名（默认取 OpenAPI 的 info.title）")
+    tool_list = tool_verbs.add_parser("list", help="列出可用的工具类型及其操作")
+
+    return [flow, compile_, diff, push, run, tool, register, tool_list]
 
 
 def confirm(
