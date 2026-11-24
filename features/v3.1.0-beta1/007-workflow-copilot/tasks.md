@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | ✅ 已拆解 | codex tasks 审查两轮；第二轮唯一的 high（AC-05 无保障）由用户选定「copilot 层走向检查」解决 |
-| 实现 | 🔄 进行中 | 6 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | 7 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -130,7 +130,7 @@
 
 ### Wave 2 — 后端 copilot
 
-- [ ] **T007**: 错误码与文案
+- [x] **T007**: 错误码与文案
   **文件**：
   - `src/backend/bisheng/common/errcode/flow.py`（10560–10563）
   - `src/frontend/packages/locales/src/api_errors/*.json`（三语）
