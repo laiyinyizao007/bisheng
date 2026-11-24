@@ -43,7 +43,7 @@ from bisheng_cli.errors import (
 )
 from bisheng_cli.flow import binding
 from bisheng_cli.flow.client import FlowClient, parse_flow_id, parse_version_id
-from bisheng_cli.flow.dsl import compile_spec, count, online_only_items, render, validate
+from bisheng_cli.flow.dsl import compile_spec, count, decompile, dump, online_only_items, render, validate
 from bisheng_cli.flow.dsl import diff as diff_definitions
 from bisheng_cli.flow.overlay import apply_overlay
 from bisheng_cli.flow.spec import load_spec
@@ -91,10 +91,12 @@ def _ask(prompt: str) -> str:
 
 
 def run(args: Any, emitter: Emitter) -> int:
-    verbs = {"compile": _compile, "diff": _diff, "push": _push, "run": _run, "tool": _tool}
+    verbs = {"compile": _compile, "diff": _diff, "push": _push, "run": _run, "export": _export, "tool": _tool}
     verb = getattr(args, "flow_command", None)
     if verb not in verbs:
-        emitter.error("用法: bisheng flow {compile,diff,push,run,tool} <声明文件> …（bisheng flow <动词> -h 查看参数）")
+        emitter.error(
+            "用法: bisheng flow {compile,diff,push,run,export,tool} <声明文件> …（bisheng flow <动词> -h 查看参数）"
+        )
         return EXIT_USAGE
     return verbs[verb](args, emitter)
 
@@ -230,6 +232,84 @@ def _diff(args: Any, emitter: Emitter) -> int:
         },
     )
     return EXIT_OK
+
+
+# ---- export ----------------------------------------------------------------------------
+
+
+def _export(args: Any, emitter: Emitter) -> int:
+    """Online workflow → declaration file (F007 AC-24); never overwrites without --force."""
+    out = Path(args.spec)
+    if out.exists() and not args.force:
+        raise CliError(
+            f"{out} 已存在，不会覆盖",
+            exit_code=EXIT_LOCAL_INVALID,
+            next_step="换一个文件名；确认要覆盖时加 --force。",
+        )
+    profile = credentials.load_selected(args)
+    fid, explicit = _target(args, profile)
+    vid = parse_version_id(args.version_id) if args.version_id is not None else None
+    with _platform(args, emitter, profile) as platform:
+        client = FlowClient(platform, cache_path=binding.template_cache_path(args.spec))
+        flow = client.get_flow(fid)
+        online = client.version_definition(fid, vid) if vid is not None else client.current_definition(fid)
+        templates, tools = client.node_templates(), client.tools()
+
+    declaration, omitted = decompile(
+        online, templates, tools, name=flow.get("name") or fid, description=flow.get("description") or None
+    )
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(dump(declaration).encode("utf-8"))
+    except OSError as exc:
+        raise CliError(
+            f"无法写出 {out}（{exc.__class__.__name__}）",
+            exit_code=EXIT_LOCAL_INVALID,
+            next_step="换一个可写的路径。",
+        ) from None
+    if explicit:
+        _bind(args, emitter, profile, fid)
+
+    where = f"版本 {vid}" if vid is not None else "线上当前版本"
+    emitter.info(
+        f"已把工作流 {fid} 的{where}导出到 {out}：{len(declaration['nodes'])} 个节点，{len(declaration['edges'])} 条连线"
+    )
+    if omitted:
+        emitter.warn(f"以下 {len(omitted)} 项声明格式表达不了，没有导出（再 push 时它们不会带上）：")
+        for item in omitted:
+            emitter.warn(f"  · {_omitted_line(item)}")
+    emitter.result(
+        COMMAND,
+        ok=True,
+        exit_code=EXIT_OK,
+        data={
+            "out": str(out),
+            "baseline": {"flow_id": fid, "version_id": vid},
+            "nodes": len(declaration["nodes"]),
+            "edges": len(declaration["edges"]),
+            "omitted": omitted,
+        },
+    )
+    return EXIT_OK
+
+
+_OMITTED_TEXT = {
+    "viewport": "画布视角",
+    "note": "便签 {node}",
+    "unknown_node_type": "节点 {node}：类型 {type} 不是平台模板里的节点类型",
+    "tool_unresolved": "工具节点 {node}：它用的工具不在可用工具列表里",
+    "unknown_field": "节点 {node} 的字段 {key}",
+    "unknown_param": "节点 {node} 的参数 {key}：当前模板没有这个参数",
+    "tool_param_not_string": "工具节点 {node} 的参数 {key}：不是文本",
+    "data_id_mismatch": "节点 {node} 的内部 id {data_id}：导出后改为画布 id",
+    "edge_to_omitted_node": "连线 {source} → {target}：连着没有导出的节点 {node}",
+}
+
+
+def _omitted_line(item: dict[str, Any]) -> str:
+    template = _OMITTED_TEXT.get(item.get("kind"), "{kind}")
+    fields = {"node": "", "type": "", "key": "", "data_id": "", "source": "", "target": "", **item}
+    return template.format(**fields)
 
 
 def _list_versions(args: Any, emitter: Emitter, profile: credentials.Profile, fid: str, explicit: bool) -> int:

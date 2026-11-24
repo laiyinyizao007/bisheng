@@ -11,12 +11,24 @@ from typing import Any
 
 from bisheng_cli.errors import EXIT_DEFECT, EXIT_LOCAL_INVALID, CliError
 from bisheng_flow_dsl import compiler as _compiler
+from bisheng_flow_dsl import decompile as _decompile
 from bisheng_flow_dsl import diff as _diff
 from bisheng_flow_dsl.diff import count, online_only_items, render
+from bisheng_flow_dsl.dump import dump
 from bisheng_flow_dsl.errors import DslError
 from bisheng_flow_dsl.validate import validate
 
-__all__ = ["compile_spec", "count", "diff", "online_only_items", "render", "resolve_tool", "validate"]
+__all__ = [
+    "compile_spec",
+    "count",
+    "decompile",
+    "diff",
+    "dump",
+    "online_only_items",
+    "render",
+    "resolve_tool",
+    "validate",
+]
 
 _NEXT_STEP = {
     "compile_issues": "按提示修正声明文件后重试。",
@@ -46,6 +58,20 @@ def compile_spec(spec: dict[str, Any], templates: list[dict[str, Any]], tools: l
 def resolve_tool(tools: Any, reference: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     try:
         return _compiler.resolve_tool(tools, reference)
+    except DslError as error:
+        raise as_cli_error(error) from None
+
+
+def decompile(
+    canvas: dict[str, Any],
+    templates: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    *,
+    name: str,
+    description: str | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    try:
+        return _decompile.decompile(canvas, templates, tools, name=name, description=description)
     except DslError as error:
         raise as_cli_error(error) from None
 
