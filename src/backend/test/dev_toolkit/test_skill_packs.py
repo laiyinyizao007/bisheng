@@ -23,7 +23,13 @@ import pytest
 
 from bisheng.dev_toolkit.domain.services.artifact_service import SKILLS_DIR
 
-PACKS = ("deploy-hosting", "platform-wiring")
+#: Packs that teach hosting an app on the platform: each ships the three pieces
+#: (SKILL.md + runnable app example + self-check) and an app manifest example.
+HOSTING_PACKS = ("deploy-hosting", "platform-wiring")
+#: Every pack the platform ships. 「工作流声明」 (F006) teaches ``flow.yaml``; it has
+#: no app to host, so the hosting checks do not apply — its content is pinned to
+#: the node templates by ``src/bisheng-cli/tests/test_skill_workflow_as_code.py``.
+ALL_PACKS = (*HOSTING_PACKS, "workflow-as-code")
 
 # F049's scan rule for a real service-account key. A pack must never carry one.
 _KEY_RE = re.compile(r"\bbs-sak-[A-Za-z0-9_-]{43}\b")
@@ -44,7 +50,14 @@ def _frontmatter(pack: Path) -> str:
     return text.split("---", 2)[1]
 
 
-@pytest.mark.parametrize("name", PACKS)
+def test_every_shipped_pack_is_listed():
+    # The distribution endpoint serves any directory with a SKILL.md, so a pack
+    # added on disk but not here would ship without the frontmatter / secret checks.
+    shipped = {path.parent.name for path in SKILLS_DIR.glob("*/SKILL.md")}
+    assert shipped == set(ALL_PACKS)
+
+
+@pytest.mark.parametrize("name", HOSTING_PACKS)
 def test_pack_has_the_three_pieces(name: str):
     # SKILL.md + runnable example + self-check script (AC-18).
     pack = _pack(name)
@@ -54,14 +67,14 @@ def test_pack_has_the_three_pieces(name: str):
     assert (pack / "selfcheck.py").is_file()
 
 
-@pytest.mark.parametrize("name", PACKS)
+@pytest.mark.parametrize("name", ALL_PACKS)
 def test_skill_md_frontmatter_name_matches_dir(name: str):
     front = _frontmatter(_pack(name))
     assert re.search(rf"^name:\s*{re.escape(name)}\s*$", front, re.MULTILINE)
     assert re.search(r"^\s*display-name:\s*\S", front, re.MULTILINE)
 
 
-@pytest.mark.parametrize("name", PACKS)
+@pytest.mark.parametrize("name", ALL_PACKS)
 def test_no_real_secret_anywhere_in_the_pack(name: str):
     for path in _pack(name).rglob("*"):
         if path.is_file():
@@ -69,7 +82,7 @@ def test_no_real_secret_anywhere_in_the_pack(name: str):
             assert not _KEY_RE.search(body), f"real key literal in {path}"
 
 
-@pytest.mark.parametrize("name", PACKS)
+@pytest.mark.parametrize("name", HOSTING_PACKS)
 def test_example_manifest_is_valid_against_the_platform_schema(name: str):
     # The example must itself pass the manifest schema it teaches — unknown keys
     # or a missing required field would mean the pack tells developers to write
@@ -86,7 +99,7 @@ def test_example_manifest_is_valid_against_the_platform_schema(name: str):
     assert manifest.capabilities.is_empty()  # capabilities must be empty this round
 
 
-@pytest.mark.parametrize("name", PACKS)
+@pytest.mark.parametrize("name", HOSTING_PACKS)
 def test_example_is_stdlib_only(name: str):
     # An empty requirements file is the contract both packs teach: the build
     # never has to reach PyPI.
@@ -94,7 +107,7 @@ def test_example_is_stdlib_only(name: str):
     assert not [line for line in requirements.splitlines() if line.strip() and not line.startswith("#")]
 
 
-@pytest.mark.parametrize("name", PACKS)
+@pytest.mark.parametrize("name", HOSTING_PACKS)
 def test_selfcheck_reports_readable_reason_when_not_logged_in(name: str, tmp_path):
     # AC-18: missing config → a readable failure, never a stack trace. Run it with
     # a fresh HOME so there is no credentials file.
