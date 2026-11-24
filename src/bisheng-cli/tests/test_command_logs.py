@@ -159,7 +159,7 @@ def test_empty_lines_prints_app_state_hint_not_blank(
 def test_empty_lines_names_the_state_when_the_server_sends_it(
     monkeypatch: pytest.MonkeyPatch, logged_in, project_dir: Path
 ) -> None:
-    """"Not running" and "running but quiet" need opposite next steps.
+    """ "Not running" and "running but quiet" need opposite next steps.
 
     The log text can never tell them apart, so the server names the state
     (F055 write-back 2). Listing all three candidates when the answer is known

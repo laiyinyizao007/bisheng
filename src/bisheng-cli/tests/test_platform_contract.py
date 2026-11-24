@@ -119,21 +119,156 @@ def _unwrap_call(value: ast.expr) -> ast.expr:
     return value
 
 
-def _build_env_keys(path: Path) -> list[str]:
-    """The string keys `build_env` sets in its `env.update({...})` call, in order."""
-    for node in _module(path).body:
-        if isinstance(node, ast.FunctionDef) and node.name == "build_env":
-            for sub in ast.walk(node):
+RUNTIME_PACKAGE = "runtime_manager"
+#: The local both runtime functions build their environment in.
+ENV_VAR = "env"
+
+
+def _imported_function(module: ast.Module, name: str) -> tuple[Path, str] | None:
+    """`(source file, original name)` for `name` imported from the runtime package, else None.
+
+    Handles `from runtime_manager.<mod> import f [as g]`, `from runtime_manager import f`,
+    and a module that is a package (`<mod>/__init__.py`).
+    """
+    root = REPO_ROOT / "src/runtime-manager"
+    for node in module.body:
+        if not (isinstance(node, ast.ImportFrom) and node.module):
+            continue
+        if node.module != RUNTIME_PACKAGE and not node.module.startswith(RUNTIME_PACKAGE + "."):
+            continue
+        for alias in node.names:
+            if (alias.asname or alias.name) == name:
+                base = root / node.module.replace(".", "/")
+                source = base.with_suffix(".py") if base.with_suffix(".py").is_file() else base / "__init__.py"
+                return source, alias.name
+    return None
+
+
+def _is_env(node: ast.expr) -> bool:
+    return isinstance(node, ast.Name) and node.id == ENV_VAR
+
+
+def _mentions_env(node: ast.AST) -> bool:
+    return any(_is_env(sub) for sub in ast.walk(node) if isinstance(sub, ast.expr))
+
+
+#: Methods that only read `env`; calling one as a bare statement writes nothing.
+_ENV_READS = frozenset({"get", "keys", "values", "items", "copy"})
+
+
+def _always_set_keys(path: Path, function: str, *, follow: bool) -> list[str]:
+    """String keys `function` sets on `env` on every call.
+
+    Recognised writes: `env.update({"K": ...})`, `env["K"] = ...`, `env = dict(...)`
+    (the seed), and `env = helper(...)` where `helper` comes from the runtime package
+    (read the same way, one hop). Statements nested in `with` / `try` count; anything
+    under `if` / `for` / `while` is conditional — the attachment handle, the egress
+    proxy, the per-language base-path spellings — and is not part of the
+    always-injected contract this CLI mirrors.
+
+    Any **other** unconditional write to `env` fails the test instead of being
+    skipped: a shape this parser cannot read must never pass as "no new names".
+    So does, even under a condition, a removal (`del env[...]`) or a write whose key
+    is not a string literal, and any statement kind the walker does not model
+    (`match`, `try/except*`, a nested `def` / `class`) that touches `env`.
+    """
+    module = _module(path)
+    node = next((n for n in module.body if isinstance(n, ast.FunctionDef) and n.name == function), None)
+    if node is None:
+        pytest.fail(f"{path.name} 里没有函数 {function}——运行期环境契约被挪走，CLI 侧必须跟着改")
+    keys: list[str] = []
+
+    def unreadable(stmt: ast.stmt) -> None:
+        pytest.fail(
+            f"{path.name}:{stmt.lineno} 的 {function} 以本测试读不懂的方式写 env：{ast.unparse(stmt)[:100]}"
+            "——确认注入契约是否变了，并让 _always_set_keys 跟上（不要让它静默跳过）"
+        )
+
+    def conditional(stmts: list[ast.stmt]) -> None:
+        """Names set here are not contract — but removals and dynamic keys still fail."""
+        for sub in (n for stmt in stmts for n in ast.walk(stmt)):
+            if isinstance(sub, ast.Delete) and any(
+                isinstance(t, ast.Subscript) and _is_env(t.value) for t in sub.targets
+            ):
+                unreadable(sub)
+            if (
+                isinstance(sub, ast.Assign)
+                and any(isinstance(t, ast.Subscript) and _is_env(t.value) for t in sub.targets)
+                and not all(
+                    isinstance(t.slice, ast.Constant) and isinstance(t.slice.value, str)
+                    for t in sub.targets
+                    if isinstance(t, ast.Subscript) and _is_env(t.value)
+                )
+            ):
+                unreadable(sub)
+
+    def walk(stmts: list[ast.stmt]) -> None:
+        for stmt in stmts:
+            if isinstance(stmt, (ast.With, ast.AsyncWith)):
+                walk(stmt.body)
+            elif isinstance(stmt, ast.Try):
+                walk(stmt.body + stmt.orelse + stmt.finalbody)
+                conditional([h for handler in stmt.handlers for h in handler.body])
+            elif isinstance(stmt, (ast.If, ast.For, ast.AsyncFor, ast.While)):
+                conditional([stmt])
+            elif isinstance(stmt, ast.Return):
+                if stmt.value is not None and not _is_env(stmt.value) and _mentions_env(stmt.value):
+                    unreadable(stmt)  # e.g. `return {**env, "NEW": ...}`
+            elif isinstance(stmt, ast.Delete) and _mentions_env(stmt):
+                unreadable(stmt)
+            elif not isinstance(stmt, (ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                if _mentions_env(stmt):
+                    unreadable(stmt)  # match / try-except* / nested def or class
+            elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                call = stmt.value
+                if not (isinstance(call.func, ast.Attribute) and _is_env(call.func.value)):
+                    continue  # not a write to env
+                if call.func.attr in _ENV_READS:
+                    continue
+                literal = call.args[0] if len(call.args) == 1 else None
                 if (
-                    isinstance(sub, ast.Call)
-                    and isinstance(sub.func, ast.Attribute)
-                    and sub.func.attr == "update"
-                    and sub.args
-                    and isinstance(sub.args[0], ast.Dict)
+                    call.func.attr == "update"
+                    and not call.keywords
+                    and isinstance(literal, ast.Dict)
+                    and all(isinstance(k, ast.Constant) and isinstance(k.value, str) for k in literal.keys)
                 ):
-                    return [key.value for key in sub.args[0].keys if isinstance(key, ast.Constant)]
-    pytest.fail(f"{path.name} 里没有 build_env 的 env.update({{...}})——运行期环境契约被改写，CLI 侧必须跟着改")
-    raise AssertionError("unreachable")
+                    keys.extend(k.value for k in literal.keys)
+                else:
+                    unreadable(stmt)
+            elif isinstance(stmt, (ast.AugAssign, ast.AnnAssign)) and _mentions_env(stmt.target):
+                unreadable(stmt)
+            elif isinstance(stmt, ast.Assign):
+                if len(stmt.targets) != 1:
+                    if any(_is_env(t) for t in stmt.targets):
+                        unreadable(stmt)
+                    continue
+                target, value = stmt.targets[0], stmt.value
+                if isinstance(target, ast.Subscript) and _is_env(target.value):
+                    if isinstance(target.slice, ast.Constant) and isinstance(target.slice.value, str):
+                        keys.append(target.slice.value)
+                    else:
+                        unreadable(stmt)
+                elif _is_env(target):
+                    helper = value.func.id if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) else None
+                    if helper == "dict" and not keys:
+                        continue  # the seed: `env = dict(extra or {})`
+                    if helper == "dict" and len(value.args) == 1 and _is_env(value.args[0]) and not value.keywords:
+                        continue  # a copy: `env = dict(env)`
+                    found = _imported_function(module, helper) if helper and follow else None
+                    if found is None:
+                        unreadable(stmt)  # includes re-seeding env after names were set
+                    keys.extend(_always_set_keys(found[0], found[1], follow=False))
+
+    walk(node.body)
+    return keys
+
+
+def _build_env_keys(path: Path) -> list[str]:
+    """The names `build_env` always injects, wherever its body delegates them to."""
+    keys = _always_set_keys(path, "build_env", follow=True)
+    if not keys:
+        pytest.fail(f"{path.name} 的 build_env 读不出任何注入名——运行期环境契约被改写，CLI 侧必须跟着改")
+    return keys
 
 
 def test_whoami_stub_has_exactly_the_fields_the_server_sends() -> None:
@@ -253,7 +388,10 @@ def test_dev_env_names_equal_the_runtime_managers_build_env() -> None:
     implemented once, in `build_env`; this is the check that the CLI never grows
     a second definition of it (design §6.2: "不得在 CLI 侧另抄一份定义").
     """
-    assert list(devdb.PLATFORM_ENV_NAMES) == _build_env_keys(RUNTIME_LIFECYCLE)
+    # Sorted, not ordered: since 4a91ec61da the keys are split between
+    # `platform_environment` and a trailing assignment in `build_env`, so source
+    # order carries no meaning. A missing, extra, or duplicated name still fails.
+    assert sorted(devdb.PLATFORM_ENV_NAMES) == sorted(_build_env_keys(RUNTIME_LIFECYCLE))
     assert tuple(devdb.RESERVED_ENV_PREFIXES) == tuple(_module_constant(RUNTIME_LIFECYCLE, "RESERVED_ENV_PREFIXES"))
 
 

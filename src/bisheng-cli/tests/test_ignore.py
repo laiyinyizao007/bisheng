@@ -147,7 +147,7 @@ def test_app_directory_inside_a_repo_uses_git_not_the_subset_parser(tmp_path: Pa
 
 
 def test_fully_ignored_directory_says_so_instead_of_packing_nothing_silently(tmp_path: Path) -> None:
-    """"git ignores everything here" and "there is nothing here" need different fixes.
+    """ "git ignores everything here" and "there is nothing here" need different fixes.
 
     Without the note, the only symptom is a later "bisheng-app.yaml missing"
     error, which points at the manifest rather than at the ignore rule that
