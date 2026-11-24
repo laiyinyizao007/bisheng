@@ -21,8 +21,23 @@ function nodeTitle(t: Translate, node: { id: string; type?: string | null; name?
     return kind && kind !== name ? `${name} (${kind})` : name;
 }
 
+const VALUE_PREVIEW_CHARS = 80;
+
+/** One value as a short line of text: long text and structures are cut, empty is said so. */
+export function valueText(t: Translate, value: unknown): string {
+    if (value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0)) {
+        return label(t, "copilot.diffEmpty", "(empty)");
+    }
+    const text = typeof value === "string" ? value : JSON.stringify(value);
+    const flat = text.replace(/\s+/g, " ").trim();
+    return flat.length > VALUE_PREVIEW_CHARS ? `${flat.slice(0, VALUE_PREVIEW_CHARS)}…` : flat;
+}
+
 export function needText(t: Translate, need: CopilotNeed, nodeNames: Record<string, string>): string {
     const node = nodeNames[need.node_id] ?? need.node_id;
+    if (need.kind === "tool_unchanged") {
+        return label(t, "copilot.needsToolUnchanged", `${node}: ${need.wanted}`, { node, wanted: need.wanted });
+    }
     if (need.kind === "tool" && need.param_key === "tool") {
         return label(t, "copilot.needsTool", `${node}: ${need.wanted}`, { node, wanted: need.wanted });
     }
@@ -66,15 +81,29 @@ export default function DiffPreview({ proposal }: Props) {
                     <ul className="ml-4 list-disc">
                         {diff.nodes_changed.map((change) => {
                             const type = types[change.id];
-                            const keys = [
-                                ...change.fields.map((f) => f.field),
-                                ...change.params.map((p) => (type ? label(tr, `node.${type}.${p.key}.label`, p.key) : p.key)),
+                            // AC-17: each changed field and parameter, old value → new value.
+                            const entries = [
+                                ...change.fields.map((f) => ({ name: f.field, before: f.online, after: f.local })),
+                                ...change.params.map((p) => ({
+                                    name: type ? label(tr, `node.${type}.${p.key}.label`, p.key) : p.key,
+                                    before: p.online,
+                                    after: p.local,
+                                })),
                             ];
                             const whole = replaced.includes(change.id) ? ` · ${label(tr, "copilot.diffReplaced", "replaced")}` : "";
                             return (
                                 <li key={change.id}>
-                                    {nodeTitle(tr, { id: change.id, type, name: names[change.id] })}: {keys.join(", ")}
+                                    {nodeTitle(tr, { id: change.id, type, name: names[change.id] })}
                                     {whole}
+                                    <ul className="ml-4 list-[circle]">
+                                        {entries.map((entry, index) => (
+                                            <li key={`${entry.name}-${index}`} data-testid="copilot-change">
+                                                {entry.name}: <span className="text-red-700 line-through dark:text-red-400">{valueText(tr, entry.before)}</span>
+                                                {" → "}
+                                                <span className="text-green-700 dark:text-green-400">{valueText(tr, entry.after)}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
                                 </li>
                             );
                         })}

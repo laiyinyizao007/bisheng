@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import copy
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from bisheng.common.errcode.flow import WorkflowCopilotModelNotConfiguredError, WorkflowCopilotModelUnavailableError
+from bisheng.core.context.tenant import get_current_tenant_id
 from bisheng.knowledge.domain.models.knowledge import KnowledgeTypeEnum
 from bisheng.knowledge.domain.services.knowledge_service import KnowledgeService
 from bisheng.llm.domain.const import LLMModelType
@@ -132,19 +134,51 @@ async def load_catalogue(*, request: Any, login_user: Any) -> Catalogue:
         if getattr(item, "default", False):
             default_agent = resource.id
 
+    tools, knowledge, qa_knowledge = await _usable_lists(request, login_user)
+    return Catalogue(
+        models=list(online_llms.values()),
+        agent_models=agent_models,
+        knowledge=list(knowledge),
+        qa_knowledge=list(qa_knowledge),
+        tools=copy.deepcopy(tools),
+        default_model_id=int(default_model_id),
+        default_agent_model_id=default_agent,
+    )
+
+
+#: Tools and knowledge bases the user may use, per (tenant, user), kept briefly: a
+#: conversation sends several turns in a row and each listing pages through every
+#: knowledge base. A grant or revoke shows up within this many seconds; nothing is
+#: trusted from the cache that the platform does not check again on save and run.
+CATALOGUE_CACHE_SECONDS = 60.0
+_CATALOGUE_CACHE_MAX = 256
+_catalogue_cache: dict[tuple[Any, Any], tuple[float, tuple[list[dict[str, Any]], list[Resource], list[Resource]]]] = {}
+
+
+async def _usable_lists(request: Any, login_user: Any) -> tuple[list[dict[str, Any]], list[Resource], list[Resource]]:
+    user_id = getattr(login_user, "user_id", None)
+    key = (get_current_tenant_id(), user_id)
+    now = time.monotonic()
+    hit = _catalogue_cache.get(key) if user_id is not None else None
+    if hit is not None and now - hit[0] < CATALOGUE_CACHE_SECONDS:
+        return hit[1]
     tools = [
         one.model_dump() if hasattr(one, "model_dump") else dict(one)
         for one in await ToolServices(login_user=login_user).get_tool_list(None, "use")
     ]
-    return Catalogue(
-        models=list(online_llms.values()),
-        agent_models=agent_models,
-        knowledge=await _knowledge(request, login_user, KnowledgeTypeEnum.NORMAL),
-        qa_knowledge=await _knowledge(request, login_user, KnowledgeTypeEnum.QA),
-        tools=tools,
-        default_model_id=int(default_model_id),
-        default_agent_model_id=default_agent,
+    lists = (
+        tools,
+        await _knowledge(request, login_user, KnowledgeTypeEnum.NORMAL),
+        await _knowledge(request, login_user, KnowledgeTypeEnum.QA),
     )
+    for stale in [k for k, (at, _) in _catalogue_cache.items() if now - at >= CATALOGUE_CACHE_SECONDS]:
+        del _catalogue_cache[stale]
+    if user_id is None:  # no identity to key on: never share
+        return lists
+    if len(_catalogue_cache) >= _CATALOGUE_CACHE_MAX:
+        del _catalogue_cache[min(_catalogue_cache, key=lambda k: _catalogue_cache[k][0])]
+    _catalogue_cache[key] = (now, lists)
+    return lists
 
 
 async def _knowledge(request: Any, login_user: Any, knowledge_type: KnowledgeTypeEnum) -> list[Resource]:

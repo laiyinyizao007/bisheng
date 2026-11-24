@@ -13,8 +13,16 @@ from typing import Any
 
 import pytest
 
+from bisheng.workflow.domain.services.copilot import resources as resources_module
 from bisheng.workflow.domain.services.copilot import service as service_module
 from bisheng.workflow.domain.services.copilot.resources import Catalogue, Resource
+
+
+@pytest.fixture(autouse=True)
+def _fresh_catalogue_cache():
+    resources_module._catalogue_cache.clear()
+    yield
+    resources_module._catalogue_cache.clear()
 
 
 def tool_child(name: str, tool_key: str, params: list[str], child_id: int) -> dict[str, Any]:

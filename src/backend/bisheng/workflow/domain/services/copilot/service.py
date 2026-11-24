@@ -25,11 +25,20 @@ the model tries again, three attempts in all.
 The model call is awaited inside the generator, never in a thread or a shielded
 task: when the client disconnects, starlette cancels the generator and the call
 with it (AC-11; decision 7 explains the ASGI condition this relies on).
+
+Bounds and secrets (G8 round 1): the canvas is capped in nodes and edges before it
+is decompiled; credentials in node parameters are replaced by a marker before the
+prompt and put back from the sent canvas afterwards (``redact.py``); the answer is
+capped in length, its YAML may not use aliases or nest deeply, and each attempt
+has a deadline. Sent nodes the declaration could not carry are put back as they
+were, and an existing tool node whose new tool does not resolve stays unchanged.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import copy
 import re
 import time
 from collections import deque
@@ -42,11 +51,12 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
 
 from bisheng.common.constants.enums.telemetry import ApplicationTypeEnum
-from bisheng.common.errcode.flow import WorkflowCopilotModelCallError
+from bisheng.common.errcode.flow import WorkflowCopilotModelCallError, WorkflowCopilotTooLargeError
 from bisheng.llm.domain.services.llm import LLMService
 from bisheng.workflow.common.node_templates import NODE_TEMPLATES
 from bisheng.workflow.domain.services.copilot.merge import merge
 from bisheng.workflow.domain.services.copilot.prompt import build_messages, retry_messages
+from bisheng.workflow.domain.services.copilot.redact import REDACTED, is_sensitive, mask, redact, restore
 from bisheng.workflow.domain.services.copilot.resources import Catalogue, resolve
 from bisheng_flow_dsl.compiler import compile_spec, describe
 from bisheng_flow_dsl.decompile import decompile
@@ -62,6 +72,16 @@ _CODE_TYPE = "code"
 _END_TYPE = "end"
 _START_TYPE = "start"
 _TEMPERATURE = 0.2
+_NOTE_TYPES = frozenset({"note", "noteNode"})
+#: The canvas is decompiled before any length check can see it: bound the work first.
+MAX_CANVAS_NODES = 500
+MAX_CANVAS_EDGES = 2_000
+#: An answer longer than this is cut off: the declaration cap plus room for the text around it.
+MAX_ANSWER_CHARS = 100_000
+#: One attempt's model call, start to last chunk (AC-27: a timeout is a failed turn, not a hang).
+MODEL_TIMEOUT_SECONDS = 180.0
+#: How deep the answer's YAML may nest; nothing in a declaration comes close.
+MAX_YAML_DEPTH = 32
 
 
 @dataclass
@@ -98,8 +118,14 @@ class WorkflowCopilotService:
             "edges": list(canvas.get("edges") or []),
             "viewport": canvas.get("viewport"),
         }
-        base, _omitted = decompile(sent, NODE_TEMPLATES, catalogue.tools, name=flow_name or "workflow")
-        declaration = dump(base)
+        if len(sent["nodes"]) > MAX_CANVAS_NODES or len(sent["edges"]) > MAX_CANVAS_EDGES:
+            raise WorkflowCopilotTooLargeError()
+        try:
+            base, _omitted = decompile(sent, NODE_TEMPLATES, catalogue.tools, name=flow_name or "workflow")
+        except RecursionError as exc:  # a parameter value nested past the interpreter's limit
+            raise WorkflowCopilotTooLargeError() from exc
+        # The model sees the declaration with credentials hidden; ``base`` keeps the originals (AC-25).
+        declaration = dump(redact(base)[0])
         messages = build_messages(
             declaration_yaml=declaration,
             history=history,
@@ -138,10 +164,23 @@ class WorkflowCopilotService:
                 yield {"type": "status", "stage": "generating" if attempt == 1 else "retrying", "attempt": attempt}
                 fence = _FenceFilter()
                 answer = ""
+                too_long = False
+                # The deadline guards only the awaits on the model, never a ``yield``: a
+                # timeout scope left open across a yield would fire in the consumer's frame.
+                deadline = asyncio.get_running_loop().time() + MODEL_TIMEOUT_SECONDS
+                chunks = llm.astream(_as_langchain(messages)).__aiter__()
                 try:
-                    async for chunk in llm.astream(_as_langchain(messages)):
+                    while True:
+                        try:
+                            async with asyncio.timeout_at(deadline):
+                                chunk = await chunks.__anext__()
+                        except StopAsyncIteration:
+                            break
                         text = chunk.content if isinstance(chunk.content, str) else ""
                         answer += text
+                        if len(answer) > MAX_ANSWER_CHARS:
+                            too_long = True
+                            break
                         visible = fence.feed(text)
                         if visible:
                             yield {"type": "delta", "text": visible}
@@ -152,11 +191,24 @@ class WorkflowCopilotService:
                     outcome = "cancelled"
                     raise
                 except Exception as exc:
-                    outcome = "model_error"
+                    outcome = "timeout" if isinstance(exc, TimeoutError) else "model_error"
                     yield {
                         "type": "error",
                         "code": WorkflowCopilotModelCallError.Code,
                         "message": f"{WorkflowCopilotModelCallError.Msg}（{type(exc).__name__}）",
+                    }
+                    return
+                finally:
+                    aclose = getattr(chunks, "aclose", None)
+                    if aclose is not None:
+                        with contextlib.suppress(Exception):
+                            await aclose()
+
+                if too_long:
+                    outcome = "too_long"
+                    yield {
+                        "type": "issues",
+                        "issues": [f"模型的回答超过 {MAX_ANSWER_CHARS} 字，已停止：请把需求拆小一些再试"],
                     }
                     return
 
@@ -170,7 +222,10 @@ class WorkflowCopilotService:
                     issues = ["回答里没有 ```yaml 代码块"]
                 else:
                     yield {"type": "status", "stage": "validating", "attempt": attempt}
-                    proposal, issues = _check(block, turn)
+                    try:
+                        proposal, issues = _check(block, turn)
+                    except RecursionError:
+                        proposal, issues = {}, ["声明嵌套过深，无法处理"]
                     if not issues:
                         outcome = "proposal"
                         yield {"type": "message", "text": reply}
@@ -197,7 +252,9 @@ class WorkflowCopilotService:
 def _check(block: str, turn: PreparedTurn) -> tuple[dict[str, Any], list[str]]:
     """``(proposal fields, issues)``; the proposal is only meaningful when issues is empty."""
     try:
-        spec = yaml.safe_load(block)
+        spec = yaml.load(block, Loader=_AnswerLoader)  # a SafeLoader subclass: no tags, no aliases
+    except _Rejected as exc:
+        return {}, [exc.reason]
     except yaml.constructor.ConstructorError:
         return {}, ["不能使用 `!include` 等 YAML 标签：长文本请直接写进 YAML（多行用 `|`）"]
     except yaml.YAMLError as exc:
@@ -206,6 +263,9 @@ def _check(block: str, turn: PreparedTurn) -> tuple[dict[str, Any], list[str]]:
         return {}, [f"YAML 格式错误{where}"]
     if not isinstance(spec, dict) or not isinstance(spec.get("nodes"), list):
         return {}, ["声明必须是一个映射，并且有 nodes 列表"]
+    hidden = restore(spec, turn.base)
+    if hidden:
+        return {}, hidden
 
     resolution = resolve(spec, turn.base, turn.catalogue, NODE_TEMPLATES)
     declaration, tools = _with_placeholders(resolution.declaration, turn.catalogue.tools, resolution.unresolved_tools)
@@ -222,22 +282,109 @@ def _check(block: str, turn: PreparedTurn) -> tuple[dict[str, Any], list[str]]:
             for n in definition["nodes"]
             if (n.get("data") or {}).get("type") == _CODE_TYPE
         ]
+    issues += _keep_uncarried(definition, turn)
     issues += _reachability(definition, turn.sent)
     if issues:
         return {}, issues
 
+    # A tool node whose tool did not resolve: a new one is left out; an existing one
+    # stays exactly as it was on the canvas (decision 4 — never removed by a name miss).
+    sent_nodes = {n.get("id"): n for n in turn.sent["nodes"]}
     dropped = set(resolution.unresolved_tools)
-    definition["nodes"] = [n for n in definition["nodes"] if n["id"] not in dropped]
+    kept_back = {i for i in dropped if i in sent_nodes}
+    left_out = dropped - kept_back
+    definition["nodes"] = [
+        copy.deepcopy(sent_nodes[n["id"]]) if n["id"] in kept_back else n
+        for n in definition["nodes"]
+        if n["id"] not in left_out
+    ]
     definition["edges"] = [
-        e for e in definition["edges"] if e.get("source") not in dropped and e.get("target") not in dropped
+        e for e in definition["edges"] if e.get("source") not in left_out and e.get("target") not in left_out
     ]
     merged = merge(turn.sent, definition)
+    present = {n.get("id") for n in merged.canvas["nodes"]}
+    needs = []
+    for need in resolution.needs_selection:
+        if need["node_id"] in kept_back:
+            if need["kind"] == "tool":  # the node's other parameters went back with it
+                needs.append({**need, "kind": "tool_unchanged"})
+        elif need["node_id"] in present or (need["node_id"] in left_out and need["kind"] == "tool"):
+            needs.append(need)
     return {
         "canvas": merged.canvas,
-        "diff": merged.diff,
-        "needs_selection": resolution.needs_selection,
+        "diff": _masked(merged.diff),
+        "needs_selection": needs,
         "replaced": merged.replaced,
     }, []
+
+
+def _keep_uncarried(definition: dict[str, Any], turn: PreparedTurn) -> list[str]:
+    """Sent nodes the declaration could not carry (an unknown type, a tool the user cannot
+    list) were never shown to the model, so their absence from the answer is not a
+    removal: they go back into the definition as sent, with the sent edges between
+    nodes that are still there (AC-08). Issues if the answer reused one of their ids."""
+    carried = {n.get("id") for n in turn.base.get("nodes") or [] if isinstance(n, dict)}
+    uncarried = {
+        n.get("id"): n
+        for n in turn.sent["nodes"]
+        if n.get("id") not in carried
+        and n.get("type") not in _NOTE_TYPES
+        and (n.get("data") or {}).get("type") not in _NOTE_TYPES
+    }
+    if not uncarried:
+        return []
+    proposed = {n["id"] for n in definition["nodes"]}
+    clashes = sorted(str(i) for i in proposed & set(uncarried))
+    if clashes:
+        return [f"节点 id {i} 已被画布上的其他节点占用，请换一个 id" for i in clashes]
+    definition["nodes"] += [copy.deepcopy(n) for n in uncarried.values()]
+    present = proposed | set(uncarried)
+    definition["edges"] += [
+        copy.deepcopy(e)
+        for e in turn.sent["edges"]
+        if (e.get("source") in uncarried or e.get("target") in uncarried)
+        and e.get("source") in present
+        and e.get("target") in present
+    ]
+    return []
+
+
+def _masked(delta: dict[str, Any]) -> dict[str, Any]:
+    """The preview never shows a credential's value (AC-25); the canvas itself keeps it."""
+    out = copy.deepcopy(delta)
+    for change in out.get("nodes_changed") or []:
+        for entry in change.get("params") or []:
+            for side in ("online", "local"):
+                if side not in entry:
+                    continue
+                value = entry[side]
+                if is_sensitive(entry.get("key")) and not isinstance(value, dict | list) and value not in (None, ""):
+                    entry[side] = REDACTED
+                else:
+                    entry[side] = mask(value)
+    return out
+
+
+class _Rejected(yaml.YAMLError):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class _AnswerLoader(yaml.SafeLoader):
+    """``safe_load`` minus aliases (a few lines of ``*ref`` expand to gigabytes) and capped in depth."""
+
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        if self.check_event(yaml.AliasEvent):
+            raise _Rejected("不能使用 YAML 别名（`*名称` / `<<: *名称`）：请把内容直接写出来")
+        depth = getattr(self, "_copilot_depth", 0) + 1
+        if depth > MAX_YAML_DEPTH:
+            raise _Rejected(f"YAML 嵌套超过 {MAX_YAML_DEPTH} 层")
+        self._copilot_depth = depth
+        try:
+            return super().compose_node(parent, index)
+        finally:
+            self._copilot_depth = depth - 1
 
 
 def _with_placeholders(

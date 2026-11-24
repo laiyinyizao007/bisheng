@@ -196,6 +196,8 @@ function applyEvent(id: number, event: CopilotEvent, update: (id: number, patch:
     switch (event.type) {
         case "status":
             update(id, {
+                // A retry streams a fresh answer: the rejected attempt's text is not kept.
+                ...(event.stage === "retrying" ? { text: "" } : {}),
                 status:
                     event.stage === "retrying"
                         ? label(t, "copilot.statusRetrying", `#${event.attempt}`, { attempt: event.attempt })

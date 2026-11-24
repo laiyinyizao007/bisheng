@@ -21,10 +21,12 @@ export const ChatTest = forwardRef((props, ref) => {
     const [width, setWidth] = useState(window.innerWidth / 2.5);
     const resizableRef = useRef(null);
     // F007: the editor keeps one right-edge panel open at a time (copilot drawer or this one).
-    const onOpenChange = (props as { onOpenChange?: (open: boolean) => void }).onOpenChange;
+    // Reported when `open` changes only: the caller passes a fresh callback on every render.
+    const onOpenChangeRef = useRef<((open: boolean) => void) | undefined>(undefined);
+    onOpenChangeRef.current = (props as { onOpenChange?: (open: boolean) => void }).onOpenChange;
     useEffect(() => {
-        onOpenChange?.(open);
-    }, [open, onOpenChange]);
+        onOpenChangeRef.current?.(open);
+    }, [open]);
 
     // Expose a `run` method through the `ref` to control the sheet's state
     useImperativeHandle(ref, () => ({

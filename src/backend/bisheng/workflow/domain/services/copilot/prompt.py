@@ -24,7 +24,10 @@ from bisheng.workflow.domain.services.copilot.resources import Catalogue
 #: The packaged skill (read-only file shipped with the backend; constitution C8 is about shared state).
 SKILL_PATH = Path(__file__).resolve().parents[4] / "dev_toolkit" / "skills" / "workflow-as-code" / "SKILL.md"
 MAX_DECLARATION_CHARS = 60_000
+#: Rounds of conversation: user turns, and all turns at twice that (a client can send only assistant turns).
 MAX_HISTORY_TURNS = 20
+#: The history's text in all, after assistant YAML is dropped (each turn is also capped by the request schema).
+MAX_HISTORY_CHARS = 60_000
 RESOURCES_HEADING = "## 你可以使用的资源（只写名称）"
 CODE_NODE_OFF = "本平台已关闭代码节点：不要使用 `code` 类型的节点；用户要求时，说明该能力已被平台关闭。"
 _ROLES = frozenset({"user", "assistant"})
@@ -45,6 +48,8 @@ PREFACE = """\
   不要让用户运行任何命令，不要提 push，不要向用户索要资源 id。
 - 不要使用 `!include`，长文本直接写进 YAML（多行用 `|`）。
 - 不要写 `position`，布局由平台安排。
+- 值为 `<已隐藏>` 的参数是平台隐藏的密码、密钥等敏感值：原样保留在原位置，不要改写，也不要复制到别的节点或参数；
+  新节点需要这类值时留空，由用户自己在画布上填写。
 
 # 修改已有工作流
 
@@ -77,7 +82,11 @@ def build_messages(
     if len(declaration_yaml) > MAX_DECLARATION_CHARS:
         raise WorkflowCopilotTooLargeError()
     turns = _history(history)
-    if sum(1 for t in turns if t["role"] == "user") > MAX_HISTORY_TURNS:
+    if (
+        sum(1 for t in turns if t["role"] == "user") > MAX_HISTORY_TURNS
+        or len(turns) > 2 * MAX_HISTORY_TURNS
+        or sum(len(t["content"]) for t in turns) > MAX_HISTORY_CHARS
+    ):
         raise WorkflowCopilotTooLargeError()
 
     system = "\n\n".join(

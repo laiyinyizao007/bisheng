@@ -52,7 +52,8 @@ export interface CopilotDiff {
 export interface CopilotNeed {
     node_id: string;
     param_key: string;
-    kind: "model" | "knowledge" | "tool";
+    /** `tool_unchanged`: an existing tool node kept as it was because the new tool was not found. */
+    kind: "model" | "knowledge" | "tool" | "tool_unchanged";
     wanted: string;
     candidates: string[];
 }

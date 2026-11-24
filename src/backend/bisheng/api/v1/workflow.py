@@ -69,8 +69,9 @@ async def get_node_templates(
 
 
 class WorkflowCopilotCanvas(BaseModel):
-    nodes: list[dict[str, Any]] = Field(default_factory=list)
-    edges: list[dict[str, Any]] = Field(default_factory=list)
+    # Hard bounds on what is parsed at all; the service's own limits (10562) sit below them.
+    nodes: list[dict[str, Any]] = Field(default_factory=list, max_length=5_000)
+    edges: list[dict[str, Any]] = Field(default_factory=list, max_length=20_000)
     viewport: dict[str, Any] | None = None
 
 
@@ -82,7 +83,7 @@ class WorkflowCopilotTurn(BaseModel):
 class WorkflowCopilotRequest(BaseModel):
     flow_id: str
     canvas: WorkflowCopilotCanvas
-    history: list[WorkflowCopilotTurn] = Field(default_factory=list)
+    history: list[WorkflowCopilotTurn] = Field(default_factory=list, max_length=200)
     message: str = Field(min_length=1, max_length=4_000)
 
 

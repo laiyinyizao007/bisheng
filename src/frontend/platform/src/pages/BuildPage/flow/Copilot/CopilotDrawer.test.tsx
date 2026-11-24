@@ -176,6 +176,42 @@ describe("a turn", () => {
         expect(screen.queryByText("Apply")).toBeNull();
     });
 
+    it("lists each changed parameter as old value → new value (AC-17)", async () => {
+        const events = proposalEvents();
+        const proposal = events[2] as Extract<CopilotEvent, { type: "proposal" }>;
+        proposal.canvas = { nodes: [{ id: "start_1", position: { x: 0, y: 0 }, data: { type: "start", name: "start" } }], edges: [] };
+        proposal.diff = {
+            ...proposal.diff,
+            nodes_only_local: [],
+            nodes_changed: [{ id: "start_1", fields: [], params: [{ key: "guide_word", online: "", local: "hello" }] }],
+        };
+        proposal.needs_selection = [{ node_id: "tool_1", param_key: "tool", kind: "tool_unchanged", wanted: "send_mail", candidates: [] }];
+        mocks.stream.mockImplementation(streamOf(events));
+        renderDrawer();
+        await send("greet");
+        const change = await screen.findByTestId("copilot-change");
+        expect(change).toHaveTextContent("guide_word: (empty) → hello");
+        expect(screen.getByTestId("copilot-needs")).toHaveTextContent("tool_1: send_mail");
+    });
+
+    it("a retry replaces the rejected attempt's streamed text", async () => {
+        mocks.stream.mockImplementation(
+            streamOf([
+                { type: "status", stage: "generating", attempt: 1 },
+                { type: "delta", text: "first try" },
+                { type: "status", stage: "retrying", attempt: 2 },
+                { type: "delta", text: "second try" },
+                { type: "issues", issues: ["still wrong"] },
+                { type: "done" },
+            ]),
+        );
+        renderDrawer();
+        await send("x");
+        await screen.findByTestId("copilot-issues");
+        expect(screen.queryByText(/first try/)).toBeNull();
+        expect(screen.getByText(/second try/)).toBeInTheDocument();
+    });
+
     it("the next turn carries the earlier text, not the proposal (AC-07)", async () => {
         mocks.stream.mockImplementation(streamOf(proposalEvents()));
         renderDrawer();

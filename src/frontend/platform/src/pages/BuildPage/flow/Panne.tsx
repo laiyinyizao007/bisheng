@@ -61,7 +61,6 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
      */
     useEffect(() => {
         if (reactFlowInstance && flow) {
-            console.log('flow updated :>> ', reactFlowInstance.toObject());
             const { nodes, edges, viewport } = reactFlowInstance.toObject()
             flow.nodes = nodes
             flow.edges = edges
