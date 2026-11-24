@@ -41,8 +41,9 @@ flowchart LR
 ### ADR-2 只用后端已有字段
 
 - 使用 `tool_call_id`、`args.query`、`args.knowledge_base_ids` 和结果里的标签串（`<knowledge_base_id>`、`<knowledge_base_name>`、`<file_title>`、`<retrieval_error>`）。
-- 知识库名称的来源，优先级从低到高：按 id 查询（`useKnowledgeBaseNames`：文档知识库查 `/api/v1/knowledge` 组织列表，知识空间查 `/knowledge/space/{id}/info`，均由 react-query 缓存）、聊天输入框已选知识库、检索结果里的名称。文档知识库与知识空间的 id 属于同一个 id 空间。
+- 知识库名称的来源，优先级从低到高：按 id 在列表里查询（`useKnowledgeBaseNames`：文档知识库查 `/api/v1/knowledge` 组织列表，知识空间查 mine、joined、department 三个空间列表合并，均由 react-query 缓存）、聊天输入框已选知识库、检索结果里的名称。文档知识库与知识空间的 id 属于同一个 id 空间。
 - 分享页（`shareToken`）不发起 id 查询，`KnownKnowledgeBaseNamesContext.lookupEnabled` 为 false。
+- 不逐个调用 `/knowledge/space/{id}/info`：用户无权限的空间会返回 403，请求层（`api/request.ts`）会把 403 变成整页跳转，加 `skip403Redirect` 又会弹出提示。列表接口只返回用户能用的空间，没有这个问题。
 
 ### ADR-3 整次调用失败与部分失败的判定
 
@@ -81,7 +82,7 @@ flowchart LR
 | 缺组件测试 | 只有纯函数测试，没有 `KnowledgeSearchRow` 的组件测试 | 中 |
 | 知识库标签来源 | id 取自模型传入的 `knowledge_base_ids`，模型传错 id 时可能显示未检索的库 | 低 |
 | 标签数大于有命中文档的知识库数 | 展开态只显示文档，不按知识库分组，没返回内容的知识库有标签但没有文档，界面不另作提示；用户反馈看不懂时再考虑在展开态按知识库列出条数 | 低 |
-| 无法解析名称的知识库 | 无权限或已删除的知识库按 id 查不到名称，其标签不显示 | 低 |
+| 无法解析名称的知识库 | 用户看不到的知识库（无权限、已删除）在列表里查不到名称，其标签不显示；组织知识库列表只取前 200 个 | 低 |
 | 无障碍 | 收起的面板中文档标签仍可聚焦 | 低 |
 | 文档标签不可点击 | 需后端补文档标识 | 待产品确认 |
 
