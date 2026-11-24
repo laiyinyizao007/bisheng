@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     check: vi.fn(),
     stream: vi.fn(),
     confirm: vi.fn(),
+    translate: vi.fn((key: string) => key),
 }));
 
 vi.mock("@/controllers/API/workflowCopilot", () => ({
@@ -16,7 +17,7 @@ vi.mock("@/controllers/API/workflowCopilot", () => ({
     streamCopilot: mocks.stream,
 }));
 vi.mock("@/components/bs-ui/alertDialog/useConfirm", () => ({ bsConfirm: mocks.confirm }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => mocks.translate(key) }) }));
 vi.mock("bisheng-icons", () => ({ Outlined: { Close: () => null } }));
 vi.mock("@bisheng/ui", () => ({
     Button: ({ children, onClick, disabled, "aria-label": ariaLabel }: { children?: unknown; onClick?: () => void; disabled?: boolean; "aria-label"?: string }) => (
@@ -90,6 +91,7 @@ beforeEach(() => {
         edges: [],
     } as unknown as CanvasState;
     mocks.check.mockResolvedValue(undefined);
+    mocks.translate.mockImplementation((key: string) => key);
 });
 afterEach(() => {
     cleanup();
@@ -210,6 +212,22 @@ describe("a turn", () => {
         await screen.findByTestId("copilot-issues");
         expect(screen.queryByText(/first try/)).toBeNull();
         expect(screen.getByText(/second try/)).toBeInTheDocument();
+    });
+
+    it("a failed turn shows the error code's localized copy with the exception class (AC-27)", async () => {
+        mocks.translate.mockImplementation((key: string) => (key === "api_errors:10563" ? "LOCALIZED-10563" : key));
+        mocks.stream.mockImplementation(
+            streamOf([
+                { type: "error", code: 10563, message: "The copilot model call failed（APIConnectionError）" },
+                { type: "done" },
+            ]),
+        );
+        renderDrawer();
+        await send("x");
+        const error = await screen.findByTestId("copilot-error");
+        expect(error).toHaveTextContent("LOCALIZED-10563");
+        expect(error).toHaveTextContent("APIConnectionError");
+        expect(error).not.toHaveTextContent("The copilot model call failed");
     });
 
     it("the next turn carries the earlier text, not the proposal (AC-07)", async () => {

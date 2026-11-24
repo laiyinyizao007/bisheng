@@ -220,9 +220,13 @@ function applyEvent(id: number, event: CopilotEvent, update: (id: number, patch:
         case "issues":
             update(id, { issues: event.issues });
             break;
-        case "error":
-            update(id, { error: event.message });
+        case "error": {
+            // The code's localized copy (AC-27), keeping the exception class the server names.
+            const kind = /（([A-Za-z0-9_]+)）$/.exec(event.message)?.[1];
+            const text = label(t, `api_errors:${event.code}`, event.message);
+            update(id, { error: kind && text !== event.message ? `${text}（${kind}）` : text });
             break;
+        }
         case "done":
             break;
     }
