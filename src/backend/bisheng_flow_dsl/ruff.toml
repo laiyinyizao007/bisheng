@@ -1,0 +1,8 @@
+# bisheng_flow_dsl is linted with the backend rules (it lives under src/backend/) plus
+# the CLI's exemption for product copy: every human-facing string here is Chinese
+# with full-width punctuation, and RUF001-003 would rewrite the copy into ASCII.
+# CI lints it from the CLI job (cli-quality.yml), which is the only job that runs ruff on it.
+extend = "../pyproject.toml"
+
+[lint]
+extend-ignore = ["RUF001", "RUF002", "RUF003"]

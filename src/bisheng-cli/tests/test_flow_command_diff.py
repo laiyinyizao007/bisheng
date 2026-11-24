@@ -18,7 +18,7 @@ import httpx
 import pytest
 
 from bisheng_cli.errors import EXIT_FORBIDDEN, EXIT_LOCAL_INVALID, EXIT_OK, EXIT_UNREACHABLE, EXIT_USAGE
-from bisheng_cli.flow.diff import render
+from bisheng_cli.flow.dsl import render
 from tests.helpers.flow_command import (
     BASE,
     FLOW_ID,

@@ -43,12 +43,10 @@ from bisheng_cli.errors import (
 )
 from bisheng_cli.flow import binding
 from bisheng_cli.flow.client import FlowClient, parse_flow_id, parse_version_id
-from bisheng_cli.flow.compiler import compile_spec
-from bisheng_cli.flow.diff import count, online_only_items, render
-from bisheng_cli.flow.diff import diff as diff_definitions
+from bisheng_cli.flow.dsl import compile_spec, count, online_only_items, render, validate
+from bisheng_cli.flow.dsl import diff as diff_definitions
 from bisheng_cli.flow.overlay import apply_overlay
 from bisheng_cli.flow.spec import load_spec
-from bisheng_cli.flow.validate import validate
 from bisheng_cli.http import PlatformClient
 from bisheng_cli.output import Emitter
 

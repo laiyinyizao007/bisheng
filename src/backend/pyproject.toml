@@ -167,7 +167,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["bisheng", "bisheng_langchain"]
+known-first-party = ["bisheng", "bisheng_langchain", "bisheng_flow_dsl"]
 
 [tool.ruff.format]
 quote-style = "double"

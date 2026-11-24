@@ -28,7 +28,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from bisheng_cli.errors import EXIT_LOCAL_INVALID, CliError
+from bisheng_flow_dsl.errors import DslError
 
 NODE_SHAPE = "flowNode"
 EDGE_SHAPE = "customEdge"
@@ -59,7 +59,7 @@ CONDITION_KEYS = frozenset({"id", "left", "op", "value", "ref", "label"})
 
 
 def compile_spec(spec: dict[str, Any], templates: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
-    """Declaration → ``{nodes, edges, viewport}``. Raises ``CliError`` listing every problem."""
+    """Declaration → ``{nodes, edges, viewport}``. Raises ``DslError`` listing every problem."""
     by_type = _template_index(templates)
     catalogue = _tool_catalogue(tools)
     issues: list[dict[str, Any]] = []
@@ -80,10 +80,10 @@ def compile_spec(spec: dict[str, Any], templates: list[dict[str, Any]], tools: l
             nodes.append(node)
     edges = [edge for edge in (_compile_edge(e, issues) for e in declared_edges) if edge is not None]
     if issues:
-        raise CliError(
+        raise DslError(
             "声明无法编译：" + "；".join(describe(issue) for issue in issues),
-            exit_code=EXIT_LOCAL_INVALID,
-            next_step="按提示修正声明文件后重试。",
+            kind="invalid",
+            reason="compile_issues",
             details={"issues": issues},
         )
     return {"nodes": nodes, "edges": edges, "viewport": dict(_VIEWPORT)}
@@ -267,12 +267,8 @@ def _well_formed_groups(template: dict[str, Any]) -> bool:
     return True
 
 
-def _platform_error(what: str) -> CliError:
-    return CliError(
-        f"平台返回的{what}格式无法识别",
-        exit_code=EXIT_LOCAL_INVALID,
-        next_step="确认平台版本与 CLI 匹配（平台可能过旧或过新）；加 --verbose 查看请求。",
-    )
+def _platform_error(what: str) -> DslError:
+    return DslError(f"平台返回的{what}格式无法识别", kind="invalid", reason="platform_shape")
 
 
 def _tool_catalogue(tools: Any) -> dict[str, list[tuple[str, dict[str, Any]]]]:

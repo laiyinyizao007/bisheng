@@ -19,7 +19,7 @@ import pytest
 
 from bisheng_cli import credentials
 from bisheng_cli.commands import flow as flow_cmd
-from bisheng_cli.flow.compiler import compile_spec
+from bisheng_cli.flow.dsl import compile_spec
 from bisheng_cli.main import run as main_run
 from tests.helpers.flow_fixtures import templates, tools
 from tests.helpers.platform_mock import FAKE_KEY, FAKE_KEY_MASK, PlatformMock, use_mock_transport, v2_ok
