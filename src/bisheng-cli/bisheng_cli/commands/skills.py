@@ -56,8 +56,9 @@ COMMAND = "skills"
 #: "environment not enabled" verdict (exit 8). A later pack that 404s on a
 #: platform which does serve the first one is a *version* gap (the platform
 #: predates that pack) and is reported as skipped, not as a failed sync — see
-#: `sync_packs`.
-DEFAULT_PACKS: tuple[str, ...] = ("deploy-hosting", "platform-wiring")
+#: `sync_packs`.「工作流声明」(F006) teaches an agent to write ``flow.yaml`` for
+#: ``bisheng flow``; it comes last because older platforms lack it.
+DEFAULT_PACKS: tuple[str, ...] = ("deploy-hosting", "platform-wiring", "workflow-as-code")
 
 SKILLS_ENDPOINT = "/api/v1/dev-toolkit/skills/{pack}"
 # Header the endpoint stamps with the platform version the pack shipped with.

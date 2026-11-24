@@ -12,6 +12,12 @@ on:
   pull_request:
     paths:
       - "src/bisheng-cli/**"
+      # tests/test_skill_workflow_as_code.py pins the 「工作流声明」 skill pack to the
+      # node templates and the engine's comparison operators (F006 AC-10): a change to either side must run it, or the
+      # drift guard exists but never fires.
+      - "src/backend/bisheng/workflow/common/node_templates.py"
+      - "src/backend/bisheng/workflow/common/condition.py"
+      - "src/backend/bisheng/dev_toolkit/skills/workflow-as-code/**"
       - "scripts/pack_cli_wheel.sh"
       - ".github/workflows/cli-quality.yml"
   workflow_dispatch:

@@ -14,6 +14,7 @@
 | 工作流节点模板（12 类节点与工具节点模板） | F005-workflow-as-code（本版本） | 模板定义归后端 `workflow.common.node_templates`，经 `GET /api/v1/workflow/node_templates`（前端）与 `GET /api/v2/flow/node_templates`（CLI）发布；前端与 CLI 只消费、不留副本；界面文案仍归前端 locale |
 | 工作流与工具的开放写入面（v2） | F005-workflow-as-code（本版本） | 新增 `workflow:write` 权限位及 `/api/v2/flows`、`/api/v2/tools` 写端点；以密钥的资源归属人身份调用既有工作流 / 工具服务与既有资源授权，仅服务账号模式，不新增代他人身份的入口；工作流与工具的写入权仍归各自既有模块 |
 | `bisheng flow` 命令族与项目内工作流绑定 | F005-workflow-as-code（本版本） | CLI 侧的声明编译、对比、推送、运行与工具注册；项目内 `.bisheng/flow.json`（进 git）与 `.bisheng/cache/`（不进 git）只存标识与本地缓存，不是任何平台数据的真相源 |
+| 开发者技能包「工作流声明」（`workflow-as-code`） | F006-flow-yaml-skill（本版本） | 技能包源码在 `dev_toolkit/skills/workflow-as-code/`，经既有技能包分发端点发布、由 `bisheng skills sync` 默认同步；只消费 F005 的节点模板与 `bisheng flow` 契约，不改动它们；参数表与模板的一致性由 CLI 测试守住 |
 
 ## 表 2：跨 Feature 不变量
 
@@ -27,6 +28,7 @@
 | F003-audit-optimization | 发版线既有审计三页签、部门与主部门、用户组、菜单授权、F019 管理租户、F056 结构化审计动作 | 只消费部门与成员关系；用户组身份不再授予审计数据访问 |
 | F004-workflow-soft-delete | 发版线既有工作流与版本、F048 权限、会话历史、分享链接 | 以单个删除标记扩展工作流生命周期；错误分类不在本特性范围 |
 | F005-workflow-as-code | 发版线既有工作流与版本服务、工具服务、F048 资源授权、F053 开放平台身份与权限位注册表、`bisheng` CLI（login / 凭据 / 输出契约）、v2 工作流运行端点 | v2 运行端点新增放行带失败原因的节点结束事件（成功事件流不变）；前端节点面板改从后端取模板 |
+| F006-flow-yaml-skill | F005-workflow-as-code（节点模板、编译器 / 校验器、`bisheng flow` 命令族）、F053 开发者技能包分发与接入 | 只新增一份技能包并把它加进 `skills sync` 的默认同步列表；平台早于本包时同步沿用既有「跳过」行为 |
 
 ## 已分配模块编码（MMMEE）
 
@@ -40,3 +42,4 @@
 | 2026-11-03 | 登记审计组织归属快照与部门数据范围，规格待确认 | F003-audit-optimization |
 | 2026-11-04 | 登记工作流单标记逻辑删除，正式规格与设计已确认，代码已实现，部署环境验收待完成 | F004-workflow-soft-delete |
 | 2026-11-22 | 登记工作流即代码：节点模板收归后端、`workflow:write` 开放写入面、`bisheng flow` 命令族；规格与设计已确认，代码已实现，隔离环境端到端已通过，前端浏览器验收待完成 | F005-workflow-as-code |
+| 2026-11-23 | 登记开发者技能包「工作流声明」：教 AI 编程助手按自然语言需求写 `flow.yaml` 并走 `bisheng flow`；小功能档，规格已确认 | F006-flow-yaml-skill |

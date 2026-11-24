@@ -1,0 +1,55 @@
+# 需求（自然语言）：
+#   做一个期货品种研究助手。用户输入一个品种或问题，大模型给出研究分析；
+#   用户输入「结束」就结束对话，否则分析完回到输入，继续下一轮。
+#
+# 用法：bisheng --json flow compile flow.yaml   → 通过后 push --create → run
+name: 期货品种研究助手
+description: 多轮研究对话；输入「结束」退出
+
+nodes:
+  - id: start_1
+    type: start
+    params:
+      guide_word: 输入一个期货品种或研究问题；输入「结束」退出。
+
+  - id: ask
+    type: input
+    name: 用户提问
+    tab: dialog_input
+
+  - id: gate
+    type: condition
+    name: 是否结束
+    cases:
+      - id: stop                      # case 的 id 就是出边的 handle
+        conditions:
+          - left: ask.user_input
+            op: regex
+            value: '^\s*结束\s*$'
+
+  - id: analyst
+    type: llm
+    name: 研究分析
+    params:
+      model_id: 0                     # 占位：必须换成平台上实际的模型 id（数字，网页「模型管理」可查）
+      temperature: 0.3
+      system_prompt: !include prompts/analyst.md
+      user_prompt: "用户的问题：{{#ask.user_input#}}"
+      output_user: false              # 由下面的 output 节点统一展示
+
+  - id: reply
+    type: output
+    name: 回复
+    params:
+      message: {msg: "{{#analyst.output#}}", files: []}
+
+  - id: end_1
+    type: end
+
+edges:
+  - {from: start_1, to: ask}
+  - {from: ask, to: gate}
+  - {from: gate, to: end_1, handle: stop}   # 命中「结束」
+  - {from: gate, to: analyst}               # 其余情况走默认出口
+  - {from: analyst, to: reply}
+  - {from: reply, to: ask}                  # 回到输入，形成多轮

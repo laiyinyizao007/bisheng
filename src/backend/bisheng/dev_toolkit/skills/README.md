@@ -16,10 +16,16 @@
       example/               零依赖样例:显示「你是谁」+ 按人存便签到应用数据库(含幂等加列)
       example-sdk/           装 SDK 的 FastAPI 样例:三件套齐用,健康探活刻意不读身份
       selfcheck.py           登录态 + 平台可达 + 库变量 + SDK 版本 + 三件套各探一次
+    workflow-as-code/        工作流声明:用 flow.yaml + bisheng flow 建 / 改 / 跑工作流
+      SKILL.md               12 类节点参数、变量引用、条件分支、工具引用、必须停下来问人的情形
+      example/               可直接编译通过的多轮研究助手(输入 → 条件 → 大模型 → 输出 → 回到输入)
 ```
 
-两个包各管一段:「部署纳管」管**怎么把应用交给平台**(清单、打包、预检),「平台能力接线」管
-**应用怎么用平台给的东西**(身份、检索、附件、数据库、模型、本地 `bisheng dev`)。SDK 三件套
+前两个包各管应用托管的一段:「部署纳管」管**怎么把应用交给平台**(清单、打包、预检),「平台能力接线」管
+**应用怎么用平台给的东西**(身份、检索、附件、数据库、模型、本地 `bisheng dev`)。「工作流声明」与应用
+托管无关,管**怎么用自然语言让 AI 写出平台工作流**:AI 照它写 `flow.yaml`,`bisheng flow` 编译校验、推送、运行。
+它的参数表与节点模板逐键对齐,由 `src/bisheng-cli/tests/test_skill_workflow_as_code.py` 守住——改了节点模板
+或校验规则而没改这份技能,CLI 的 CI 会红。SDK 三件套
 (auth / retrieve / storage)的章节已经在「平台能力接线」里;模型协议面不走 SDK ——它是 OpenAI 兼容面,
 官方 `openai` 客户端 + 平台注入的 `OPENAI_BASE_URL` / `OPENAI_API_KEY` 即可,那一章讲的是名字解析、
 清单声明与访问者凭据转发。
@@ -41,6 +47,7 @@
   改动本项目前请先读:
   - `~/.bisheng/skills/<平台地址>.<哈希>/deploy-hosting/SKILL.md`
   - `~/.bisheng/skills/<平台地址>.<哈希>/platform-wiring/SKILL.md`
+  - `~/.bisheng/skills/<平台地址>.<哈希>/workflow-as-code/SKILL.md`
   ```
 
 - **手动**:直接把 `SKILL.md` 的内容贴给 AI,告诉它「照这个把应用部署到平台」。

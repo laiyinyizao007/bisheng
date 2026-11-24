@@ -35,6 +35,7 @@ from tests.helpers.platform_mock import (
 BASE = "http://platform.test"
 PACK = "deploy-hosting"
 SECOND_PACK = "platform-wiring"
+THIRD_PACK = "workflow-as-code"
 SKILLS_PATH = f"/api/v1/dev-toolkit/skills/{PACK}"
 
 
@@ -275,17 +276,34 @@ def test_sync_clears_the_pre_profile_layout(monkeypatch: pytest.MonkeyPatch, log
     assert (_skills_dir(home_dir) / PACK / "SKILL.md").is_file()
 
 
-def test_two_packs_ship_and_both_are_synced(monkeypatch: pytest.MonkeyPatch, logged_in, home_dir) -> None:
-    # T038: 「平台能力接线」 rides beside 「部署纳管」. Both land, both are reported.
-    assert DEFAULT_PACKS == ("deploy-hosting", "platform-wiring")
+def test_three_packs_ship_and_all_are_synced(monkeypatch: pytest.MonkeyPatch, logged_in, home_dir) -> None:
+    # T038: 「平台能力接线」 rides beside 「部署纳管」; F006 adds 「工作流声明」 after them.
+    # All land, all are reported, in that order.
+    assert DEFAULT_PACKS == ("deploy-hosting", "platform-wiring", "workflow-as-code")
     mock = PlatformMock().get(SKILLS_PATH, _pack_response(SAMPLE))
     code, out, err = _run(["skills", "sync", "--json"], monkeypatch=monkeypatch, mock=mock)
     assert code == EXIT_OK
-    assert mock.paths_called() == [skills_path(PACK), skills_path(SECOND_PACK)]
+    assert mock.paths_called() == [skills_path(PACK), skills_path(SECOND_PACK), skills_path(THIRD_PACK)]
     for pack in DEFAULT_PACKS:
         assert (_skills_dir(home_dir) / pack / "SKILL.md").is_file()
-    assert "platform-wiring" in err
-    assert '"pack": "platform-wiring"' in out
+    for pack in (SECOND_PACK, THIRD_PACK):
+        assert pack in err
+        assert f'"pack": "{pack}"' in out
+
+
+def test_workflow_pack_missing_on_a_pre_f006_platform_is_skipped(
+    monkeypatch: pytest.MonkeyPatch, logged_in, home_dir
+) -> None:
+    # F006 AC-14: a platform from before 「工作流声明」 still syncs the two packs it has.
+    mock = PlatformMock().get(SKILLS_PATH, _pack_response(SAMPLE))
+    mock.get(skills_path(THIRD_PACK), httpx.Response(404, json={"detail": "Not Found"}))
+    code, out, err = _run(["skills", "sync", "--json"], monkeypatch=monkeypatch, mock=mock)
+    assert code == EXIT_OK
+    for pack in (PACK, SECOND_PACK):
+        assert (_skills_dir(home_dir) / pack / "SKILL.md").is_file()
+    assert not (_skills_dir(home_dir) / THIRD_PACK).exists()
+    assert THIRD_PACK in err and "跳过" in err
+    assert '"skipped": true' in out
 
 
 def test_second_pack_missing_on_an_older_platform_is_skipped_not_fatal(

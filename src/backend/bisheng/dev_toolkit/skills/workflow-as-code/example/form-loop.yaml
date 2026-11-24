@@ -1,0 +1,81 @@
+# 需求（自然语言）：
+#   做一个研报摘要工作流：用户用表单填写「品种」和「研报正文」；正文为空就提示补充并回到表单；
+#   否则先由大模型生成三条要点摘要，再由第二个大模型基于摘要给出风险提示，最后一起输出并结束。
+#
+# 演示：表单输入、空值判断（含只有空格）、提示后回到表单、两个大模型串联。
+name: 研报摘要
+description: 表单输入品种与研报正文 → 三条要点摘要 → 风险提示 → 合并输出
+
+nodes:
+  - id: start_1
+    type: start
+
+  - id: form
+    type: input
+    name: 填写研报
+    tab: form_input
+    params:
+      form_input:
+        - {key: variety, type: text, value: 品种, required: true, multiple: false, options: []}
+        # 不设必填：正文为空要走下面的提示分支
+        - {key: report, type: text, value: 研报正文, required: false, multiple: false, options: []}
+
+  - id: gate
+    type: condition
+    name: 正文是否为空
+    cases:
+      - id: empty
+        logic: or
+        conditions:
+          - {left: form.report, op: is_empty}
+          - {left: form.report, op: regex, value: '^\s*$'}   # 只有空格也算空
+
+  - id: need_more
+    type: output
+    name: 提示补充
+    params:
+      message: {msg: "研报正文为空，请补充后重新提交。", files: []}
+
+  - id: summarizer
+    type: llm
+    name: 要点摘要
+    params:
+      model_id: 0                     # 占位：必须换成平台上实际的模型 id
+      system_prompt: !include prompts/summarizer.md
+      user_prompt: "品种：{{#form.variety#}}\n研报正文：\n{{#form.report#}}"
+      output_user: false
+
+  - id: risk
+    type: llm
+    name: 风险提示
+    params:
+      model_id: 0                     # 占位，同上
+      system_prompt: !include prompts/risk.md
+      user_prompt: "品种：{{#form.variety#}}\n要点摘要：\n{{#summarizer.output#}}"
+      output_user: false
+
+  - id: reply
+    type: output
+    name: 摘要与风险提示
+    params:
+      message:
+        msg: |
+          【{{#form.variety#}}】研报要点摘要
+          {{#summarizer.output#}}
+
+          风险提示
+          {{#risk.output#}}
+        files: []
+
+  - id: end_1
+    type: end
+
+edges:
+  - {from: start_1, to: form}
+  - {from: form, to: gate}
+  - {from: gate, to: need_more, handle: empty}
+  - {from: need_more, to: form}          # 只展示不暂停，直接回到表单等待
+  - {from: gate, to: summarizer}         # 默认出口
+  - {from: summarizer, to: risk}
+  - {from: risk, to: reply}
+  - {from: reply, to: end_1}
