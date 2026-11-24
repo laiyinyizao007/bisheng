@@ -32,7 +32,7 @@ def _imported_roots(path: Path) -> set[str]:
 
 
 def test_the_neutral_package_exists_with_its_modules():
-    for name in ("__init__", "errors", "compiler", "validate", "diff"):
+    for name in ("__init__", "errors", "compiler", "validate", "diff", "decompile", "dump"):
         assert (DSL_ROOT / f"{name}.py").is_file(), name
 
 

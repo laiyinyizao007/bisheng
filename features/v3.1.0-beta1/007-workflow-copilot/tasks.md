@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | 🔲 草稿 | 拆解完成后改为 ✅ 已拆解 |
-| 实现 | 🔄 进行中 | 3 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | 5 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -88,7 +88,7 @@
   **覆盖 AC**：AC-23
   **依赖**：T002
 
-- [ ] **T004**: 反编译测试（先红）
+- [x] **T004**: 反编译测试（先红）
   **文件**：`src/bisheng-cli/tests/test_dsl_decompile.py`
   **测试**：
   - F006 两个样例：编译 → 反编译 → 再编译，`diff` 无差异。
@@ -101,7 +101,7 @@
   **覆盖 AC**：AC-24、AC-08
   **依赖**：T002
 
-- [ ] **T005**: 反编译与 YAML 输出实现
+- [x] **T005**: 反编译与 YAML 输出实现
   **文件**：`src/backend/bisheng_flow_dsl/{decompile,dump}.py`
   **逻辑**：
   - 画布 → 声明：按模板识别参数；只写与模板默认值不同的参数；工具节点写 `tool: <名称>`；条件写 `cases`；连线写 `from` / `to` / `handle`；写 `position`。
