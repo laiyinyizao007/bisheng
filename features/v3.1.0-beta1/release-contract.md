@@ -13,7 +13,7 @@
 | 工作流逻辑删除 | F004-workflow-soft-delete（本版本） | 保留主记录和版本，封闭普通查询与新操作；沿用既有授权、审计及历史数据归属，不新增在途协调 |
 | 工作流节点模板（12 类节点与工具节点模板） | F005-workflow-as-code（本版本） | 模板定义归后端 `workflow.common.node_templates`，经 `GET /api/v1/workflow/node_templates`（前端）与 `GET /api/v2/flow/node_templates`（CLI）发布；前端与 CLI 只消费、不留副本；界面文案仍归前端 locale |
 | 工作流与工具的开放写入面（v2） | F005-workflow-as-code（本版本） | 新增 `workflow:write` 权限位及 `/api/v2/flows`、`/api/v2/tools` 写端点；以密钥的资源归属人身份调用既有工作流 / 工具服务与既有资源授权，仅服务账号模式，不新增代他人身份的入口；工作流与工具的写入权仍归各自既有模块 |
-| `bisheng flow` 命令族与项目内工作流绑定 | F005-workflow-as-code（本版本） | CLI 侧的声明编译、对比、推送、运行与工具注册；项目内 `.bisheng/flow.json`（进 git）与 `.bisheng/cache/`（不进 git）只存标识与本地缓存，不是任何平台数据的真相源 |
+| `bisheng flow` 命令族与项目内工作流绑定 | F005-workflow-as-code（本版本） | CLI 侧的声明编译、对比、推送、运行与工具注册（编译 / 校验 / 对比 / 反编译的规则实现自 F007 起在中立包 `src/backend/bisheng_flow_dsl/`，平台后端与 CLI 共用这一份，随 CLI wheel 打包；CLI 经 `bisheng_cli/flow/dsl.py` 使用）；项目内 `.bisheng/flow.json`（进 git）与 `.bisheng/cache/`（不进 git）只存标识与本地缓存，不是任何平台数据的真相源 |
 | 开发者技能包「工作流声明」（`workflow-as-code`） | F006-flow-yaml-skill（本版本） | 技能包源码在 `dev_toolkit/skills/workflow-as-code/`，经既有技能包分发端点发布、由 `bisheng skills sync` 默认同步；只消费 F005 的节点模板与 `bisheng flow` 契约，不改动它们；参数表与模板的一致性由 CLI 测试守住 |
 | 工作流编辑页 copilot（自然语言生成 / 修改工作流的方案与差异预览） | F007-workflow-copilot（本版本） | 只产出方案并在用户点「应用」后改写编辑页画布，不保存、不上线、不运行；不新增对话存储；模型取既有「工作流默认模型」，资源只在用户有权使用的范围内匹配；编译与校验复用 F005 的同一套实现，知识来源复用 F006 技能包，不留副本 |
 
