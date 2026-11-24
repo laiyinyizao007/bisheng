@@ -439,3 +439,12 @@ async def test_the_cache_separates_tenant_views(monkeypatch: pytest.MonkeyPatch)
     scope[0] = 7  # the same admin switched the management view
     await resources_module.load_catalogue(request=None, login_user=admin)
     assert calls == [1, 1]
+
+
+async def test_a_node_id_that_is_not_a_string_is_fed_back(scripted_llm) -> None:
+    odd = FULL_FLOW.replace("  - id: end_1\n", "  - id: [end, 1]\n").replace("to: end_1}", "to: end}")
+    scripted_llm(answer(odd), answer(odd), answer(odd))
+    events = await run(prepare())
+    assert not of(events, "error")
+    (issues,) = of(events, "issues")
+    assert any("字符串 id" in text for text in issues["issues"])

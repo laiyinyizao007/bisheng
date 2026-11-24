@@ -277,6 +277,8 @@ def _check(block: str, turn: PreparedTurn) -> tuple[dict[str, Any], list[str]]:
     repeated = []
     for node in spec["nodes"]:
         node_id = node.get("id") if isinstance(node, dict) else None
+        if not isinstance(node_id, str) or not node_id:
+            return {}, [f"每个节点都要有字符串 id（收到 {node_id!r}）"]
         if node_id in seen and node_id not in repeated:
             repeated.append(node_id)
         seen.add(node_id)

@@ -46,3 +46,4 @@
 | 2026-11-22 | 登记工作流即代码：节点模板收归后端、`workflow:write` 开放写入面、`bisheng flow` 命令族；规格与设计已确认，代码已实现，隔离环境端到端已通过，前端浏览器验收待完成 | F005-workflow-as-code |
 | 2026-11-23 | 登记开发者技能包「工作流声明」：教 AI 编程助手按自然语言需求写 `flow.yaml` 并走 `bisheng flow`；小功能档，规格已确认 | F006-flow-yaml-skill |
 | 2026-11-23 | 登记工作流编辑页 copilot：自然语言生成 / 修改工作流、差异预览后应用到画布；Full SDD，规格待确认 | F007-workflow-copilot |
+| 2026-11-24 | F007 规格与设计已确认，代码已实现。<br>• 编译 / 校验 / 对比 / 反编译规则迁入中立包 `bisheng_flow_dsl`，平台后端与 CLI 共用；CLI 新增 `flow export`。<br>• 占用错误码 10560–10563。<br>• G8 两轮审查的问题已修复，包括画布凭据不进提示词、各项长度上限、超时。<br>• 隔离环境端到端（MiniMax）通过；TC-CPL-010/011 因环境无向量模型未执行 | F007-workflow-copilot、F005-workflow-as-code |
