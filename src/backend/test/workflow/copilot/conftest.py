@@ -51,16 +51,19 @@ def make_catalogue(**overrides: Any) -> Catalogue:
 
 
 class ScriptedLLM:
-    def __init__(self, script: list[Any], calls: list[dict[str, Any]], gate: asyncio.Event | None) -> None:
+    def __init__(self, script: list[Any], state: dict[str, Any]) -> None:
         self._script = script
-        self._calls = calls
-        self._gate = gate
+        self._state = state
 
     async def astream(self, messages: list[Any]):
-        self._calls.append({"messages": [(type(m).__name__, m.content) for m in messages]})
+        self._state["calls"].append({"messages": [(type(m).__name__, m.content) for m in messages]})
         answer = self._script.pop(0)
-        if self._gate is not None:
-            await self._gate.wait()  # lets a test hold the call open and cancel it
+        if self._state["gate"] is not None:
+            try:
+                await self._state["gate"].wait()  # lets a test hold the call open and cancel it
+            except asyncio.CancelledError:
+                self._state["cancelled"] = True
+                raise
         if isinstance(answer, BaseException):
             raise answer
         for start in range(0, len(answer), 7):
@@ -76,7 +79,7 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch):
 
         async def factory(**kwargs: Any) -> ScriptedLLM:
             state["factory"].append(kwargs)
-            return ScriptedLLM(script, state["calls"], state["gate"])
+            return ScriptedLLM(script, state)
 
         monkeypatch.setattr(service_module.LLMService, "get_bisheng_llm", factory)
         return state

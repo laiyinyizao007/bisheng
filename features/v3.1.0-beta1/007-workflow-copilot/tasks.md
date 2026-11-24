@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | ✅ 已拆解 | codex tasks 审查两轮；第二轮唯一的 high（AC-05 无保障）由用户选定「copilot 层走向检查」解决 |
-| 实现 | 🔄 进行中 | 14 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | 16 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -221,7 +221,7 @@
   **测试**：T013 全部通过
   **依赖**：T013
 
-- [ ] **T015**: 端点测试（先红）
+- [x] **T015**: 端点测试（先红）
   **文件**：`src/backend/test/workflow/copilot/test_endpoint.py`
   **测试**：
   - 无编辑权限被拒，且未调用模型。
@@ -232,7 +232,7 @@
   **覆盖 AC**：AC-04、AC-11、AC-17
   **依赖**：T014
 
-- [ ] **T016**: 端点实现
+- [x] **T016**: 端点实现
   **文件**：`src/backend/bisheng/api/v1/workflow.py`（`POST /workflow/copilot`）
   **测试**：T015 全部通过；对本特性每个改动的后端 .py 逐个跑 `bash scripts/arch-guard.sh <文件>`
   **依赖**：T015

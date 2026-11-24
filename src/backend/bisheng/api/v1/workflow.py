@@ -1,10 +1,13 @@
+import json
 import time
-from typing import Union
+from typing import Any, Literal, Union
 
 import jwt
 from fastapi import APIRouter, Body, Depends, Query, Request, WebSocket, WebSocketException
 from fastapi import status as http_status
+from fastapi.responses import StreamingResponse
 from loguru import logger
+from pydantic import BaseModel, Field
 
 from bisheng.api.services import report_template
 from bisheng.api.services.flow import FlowService
@@ -15,7 +18,7 @@ from bisheng.api.v1.schemas import FlowVersionCreate, resp_200
 from bisheng.common.chat.types import WorkType
 from bisheng.common.constants.enums.telemetry import BaseTelemetryTypeEnum
 from bisheng.common.dependencies.user_deps import UserPayload
-from bisheng.common.errcode.flow import AppWriteAuthError, WorkFlowOnlineEditError
+from bisheng.common.errcode.flow import AppWriteAuthError, WorkflowCopilotModelCallError, WorkFlowOnlineEditError
 from bisheng.common.errcode.http_error import NotFoundError, ServerError, UnAuthorizedError
 from bisheng.common.services import telemetry_service
 from bisheng.common.services.config_service import settings as bisheng_settings
@@ -32,6 +35,8 @@ from bisheng.share_link.api.dependencies import header_share_token_parser
 from bisheng.share_link.domain.models.share_link import ShareLink
 from bisheng.utils import generate_uuid
 from bisheng.workflow.common.node_templates import NODE_TEMPLATES
+from bisheng.workflow.domain.services.copilot.resources import load_catalogue
+from bisheng.workflow.domain.services.copilot.service import WorkflowCopilotService
 from bisheng_langchain.utils.requests import Requests
 
 router = APIRouter(prefix="/workflow", tags=["Workflow"])
@@ -61,6 +66,75 @@ async def get_node_templates(
     从这里取同一份数据。响应里只有结构与参数键——界面文案由前端本地化资源提供。
     """
     return resp_200(data=NODE_TEMPLATES)
+
+
+class WorkflowCopilotCanvas(BaseModel):
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+    viewport: dict[str, Any] | None = None
+
+
+class WorkflowCopilotTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=20_000)
+
+
+class WorkflowCopilotRequest(BaseModel):
+    flow_id: str
+    canvas: WorkflowCopilotCanvas
+    history: list[WorkflowCopilotTurn] = Field(default_factory=list)
+    message: str = Field(min_length=1, max_length=4_000)
+
+
+@router.post("/copilot")
+async def workflow_copilot(
+    request: Request,
+    payload: WorkflowCopilotRequest,
+    login_user: UserPayload = Depends(UserPayload.get_login_user),
+):
+    """F007: one copilot turn on the editor's canvas, streamed as NDJSON.
+
+    Errors known before the stream starts — no edit permission (AC-04), the
+    workflow default model not configured / unavailable (10560 / 10561), input too
+    large (10562) — are ordinary JSON envelopes and call no model. Events are
+    documented in ``copilot/service.py``; the stream always ends with ``done``.
+    Nothing is saved: the proposal only lands when the user applies it.
+    """
+    flow = await FlowService.judge_flow_write_permission(login_user, payload.flow_id)
+    catalogue = await load_catalogue(request=request, login_user=login_user)
+    turn = WorkflowCopilotService.prepare(
+        flow_id=payload.flow_id,
+        flow_name=getattr(flow, "name", "") or payload.flow_id,
+        canvas=payload.canvas.model_dump(),
+        history=[t.model_dump() for t in payload.history],
+        message=payload.message,
+        catalogue=catalogue,
+        code_node_enabled=_code_node_enabled(),
+        user_id=login_user.user_id,
+    )
+
+    async def events():
+        try:
+            async for event in WorkflowCopilotService.stream(turn):
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except Exception as exc:  # the stream has started: report in-band, never the exception text
+            logger.warning(f"workflow copilot stream failed flow={payload.flow_id} error={type(exc).__name__}")
+            failure = {
+                "type": "error",
+                "code": WorkflowCopilotModelCallError.Code,
+                "message": WorkflowCopilotModelCallError.Msg,
+            }
+            yield json.dumps(failure, ensure_ascii=False) + "\n"
+        yield json.dumps({"type": "done"}) + "\n"
+
+    return StreamingResponse(events(), media_type="application/x-ndjson")
+
+
+def _code_node_enabled() -> bool:
+    try:
+        return bool(bisheng_settings.get_workflow_conf().code_node_enabled)
+    except Exception:  # unreadable config: the platform treats the switch as off
+        return False
 
 
 @router.get("/write/auth")
