@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | ✅ 已拆解 | codex tasks 审查两轮；第二轮唯一的 high（AC-05 无保障）由用户选定「copilot 层走向检查」解决 |
-| 实现 | 🔄 进行中 | 20 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | 21 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -290,7 +290,7 @@
 
 ### Wave 4 — 收尾
 
-- [ ] **T021**: 全量回归
+- [x] **T021**: 全量回归（后端 CI 名单 + copilot 195 过、CLI 994 过，失败均为既有 Windows 基线 2+4 条；前端四闸门通过、vitest 无新增失败）
   **逻辑**：
   - 后端 copilot 与相关测试、CLI 全量测试、CI 用的 ruff 精确清单。
   - 前端 vitest：比对基线，只看新增失败。
