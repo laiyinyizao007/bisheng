@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | ✅ 已拆解 | codex tasks 审查两轮；第二轮唯一的 high（AC-05 无保障）由用户选定「copilot 层走向检查」解决 |
-| 实现 | 🔄 进行中 | 16 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | 17 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -239,7 +239,7 @@
 
 ### Wave 3 — 前端
 
-- [ ] **T017**: 流式请求支持请求体 + copilot 请求函数
+- [x] **T017**: 流式请求支持请求体 + copilot 请求函数（请求函数放新文件 `controllers/API/workflowCopilot.ts`，不动带 @ts-strict-ignore 的 workflow.ts）
   **文件**：
   - `src/frontend/platform/src/controllers/requestStream.ts`：签名定为 `requestStream(url, signal?, body?)`，body 放第 3 位、默认 `{}`。既有调用点 `controllers/API/dshModelAudit.ts` 以第 2 位传 signal，保持不变
   - `controllers/API/workflow.ts`

@@ -21,6 +21,19 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("shared streaming request policy", () => {
+  it("sends the JSON body when given and {} otherwise (F007 T017)", async () => {
+    const ndjson = () =>
+      new Response(new ReadableStream<Uint8Array>({ start: (c) => c.close() }), {
+        headers: { "content-type": "application/x-ndjson" },
+      });
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(ndjson()));
+    vi.stubGlobal("fetch", fetchMock);
+    const { requestStream } = await import("./requestStream");
+    await requestStream("/api/v1/workflow/copilot", undefined, { message: "加一个节点", history: [] });
+    await requestStream("/api/v1/audit");
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body)).toEqual({ message: "加一个节点", history: [] });
+    expect(fetchMock.mock.calls[1]?.[1].body).toBe("{}");
+  });
   it("reuses base URL and Bearer authentication without buffering the successful body", async () => {
     const request = (await import("./request")).default;
     request.defaults.baseURL = "/base/";
