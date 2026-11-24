@@ -35,7 +35,7 @@ from bisheng.share_link.api.dependencies import header_share_token_parser
 from bisheng.share_link.domain.models.share_link import ShareLink
 from bisheng.utils import generate_uuid
 from bisheng.workflow.common.node_templates import NODE_TEMPLATES
-from bisheng.workflow.domain.services.copilot.resources import load_catalogue
+from bisheng.workflow.domain.services.copilot.resources import check_default_model, load_catalogue
 from bisheng.workflow.domain.services.copilot.service import WorkflowCopilotService
 from bisheng_langchain.utils.requests import Requests
 
@@ -84,6 +84,22 @@ class WorkflowCopilotRequest(BaseModel):
     canvas: WorkflowCopilotCanvas
     history: list[WorkflowCopilotTurn] = Field(default_factory=list)
     message: str = Field(min_length=1, max_length=4_000)
+
+
+@router.get("/copilot/availability")
+async def workflow_copilot_availability(
+    flow_id: str = Query(..., description="Workflow id"),
+    login_user: UserPayload = Depends(UserPayload.get_login_user),
+):
+    """F007 AC-03: can the copilot run here? Checked when the drawer opens.
+
+    Same gates as a turn, without listing resources or calling a model: edit
+    permission, then the workflow default model (10560 not configured / 10561
+    deleted or offline), each as an ordinary error envelope.
+    """
+    await FlowService.judge_flow_write_permission(login_user, flow_id)
+    await check_default_model()
+    return resp_200(data={"available": True})
 
 
 @router.post("/copilot")

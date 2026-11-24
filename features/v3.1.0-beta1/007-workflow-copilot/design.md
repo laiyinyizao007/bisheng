@@ -287,6 +287,8 @@ sequenceDiagram
 }
 ```
 
+**可用性** `GET /api/v1/workflow/copilot/availability?flow_id=…`（登录态）：抽屉打开时调用。依次检查编辑权限和工作流默认模型，与生成请求的前置检查相同，但不列资源、不调模型。可用返回 `{available: true}`，否则返回普通错误（10560 / 10561 / 权限错误）。前端据此禁用发送（AC-03）。
+
 - `history` 中 assistant 的内容只含文字回复，不含 yaml。每轮的基础是画布，不是上一轮的方案（AC-07）。
 - `proposal.diff` 沿用 F005 `diff()` 的结构，调用方式是 `diff(local=方案, online=发送时画布)`（决策 3）：`nodes_only_local` = 新增，`nodes_only_online` = 删除，`nodes_changed`，`edges_*`。前端用 `node.<type>.<key>` 的本地化文案显示参数名。
 - **错误码**（105 段内新开 10560–10569 子段，`common/errcode/flow.py`）：
@@ -418,3 +420,4 @@ sequenceDiagram
 | 2026-11-23 | 初稿（待用户确认） |
 | 2026-11-23 | 按 codex design 审查修订：差异参数顺序统一为 diff(local=方案, online=发送时画布)；补 editable 复制语义与 CLI 测试导入路径；PyYAML 提为后端直接依赖；资源服务签名与模型筛选口径；停止机制的两个前提；职责表「不做什么」；端到端步骤；错误码登记 |
 | 2026-11-23 | 实现偏差（细节级，不改决策）：T002 的搬包与 import 迁移一次完成，未按 tasks 审查建议拆成两个任务。行为不变由 CLI 全量测试证明（973 通过，4 条为既有 Windows 基线失败）。中立包边界由 `tests/test_dsl_boundary.py` 守住，变异检查 3 红 1 绿。isort 登记与中立包的 `ruff.toml` 也在 T002 完成 |
+| 2026-11-24 | 实现补充（细节级）：新增 `GET /workflow/copilot/availability`。AC-03 要求不发生成请求就能判断默认模型可用与否，而「已停用」只有后端知道；检查逻辑与生成请求共用 `resources.check_default_model` |

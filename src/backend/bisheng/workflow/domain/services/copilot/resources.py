@@ -95,8 +95,12 @@ class Resolution:
 # ---- the usable set ------------------------------------------------------------------------
 
 
-async def load_catalogue(*, request: Any, login_user: Any) -> Catalogue:
-    """Everything the user can put into a node. Raises 10560 / 10561 when the copilot's own model is unusable."""
+async def check_default_model() -> tuple[int, dict[int, Resource]]:
+    """``(workflow default model id, online LLMs by id)``; raises 10560 / 10561 when the copilot's own model is unusable.
+
+    Cheap on purpose (no knowledge or tool listing): the editor asks it when the drawer
+    opens, so an unusable model disables sending without a generation request (AC-03).
+    """
     workflow_cfg, _, _ = await LLMService.aget_workflow_llm_with_meta()
     default_model_id = getattr(workflow_cfg, "model_id", None)
     if not default_model_id:
@@ -111,6 +115,12 @@ async def load_catalogue(*, request: Any, login_user: Any) -> Catalogue:
                 )
     if int(default_model_id) not in online_llms:
         raise WorkflowCopilotModelUnavailableError()
+    return int(default_model_id), online_llms
+
+
+async def load_catalogue(*, request: Any, login_user: Any) -> Catalogue:
+    """Everything the user can put into a node. Raises 10560 / 10561 when the copilot's own model is unusable."""
+    default_model_id, online_llms = await check_default_model()
 
     assistant = await LLMService.get_assistant_llm()
     agent_models, default_agent = [], None

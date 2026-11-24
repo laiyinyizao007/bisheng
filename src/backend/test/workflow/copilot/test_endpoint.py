@@ -151,3 +151,34 @@ async def test_client_disconnect_cancels_the_model_call(app: FastAPI, scripted_l
     }
     await asyncio.wait_for(app(scope, receive, send), timeout=10)
     assert state["cancelled"] is True  # AC-11
+
+
+# ---- availability (AC-03: checked when the drawer opens, no model call) ----------------------
+
+
+def test_availability_reports_a_usable_model(app: FastAPI, monkeypatch) -> None:
+    monkeypatch.setattr(workflow_api, "check_default_model", AsyncMock(return_value=(1, {})))
+    reply = TestClient(app).get(PATH + "/availability", params={"flow_id": "f1"}).json()
+    assert reply["status_code"] == 200 and reply["data"] == {"available": True}
+
+
+def test_availability_reports_why_not(app: FastAPI, monkeypatch) -> None:
+    monkeypatch.setattr(
+        workflow_api, "check_default_model", AsyncMock(side_effect=WorkflowCopilotModelNotConfiguredError())
+    )
+    assert TestClient(app).get(PATH + "/availability", params={"flow_id": "f1"}).json()["status_code"] == 10560
+
+
+def test_availability_needs_edit_permission(app: FastAPI, monkeypatch) -> None:
+    check = AsyncMock(return_value=(1, {}))
+    monkeypatch.setattr(workflow_api, "check_default_model", check)
+    monkeypatch.setattr(
+        workflow_api.FlowService,
+        "judge_flow_write_permission",
+        AsyncMock(side_effect=UnAuthorizedError.http_exception()),
+    )
+    assert (
+        TestClient(app).get(PATH + "/availability", params={"flow_id": "f1"}).json()["status_code"]
+        == UnAuthorizedError.Code
+    )
+    check.assert_not_awaited()
