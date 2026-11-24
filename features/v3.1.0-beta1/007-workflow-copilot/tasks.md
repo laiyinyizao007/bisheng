@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | ✅ 已拆解 | codex tasks 审查两轮；第二轮唯一的 high（AC-05 无保障）由用户选定「copilot 层走向检查」解决 |
-| 实现 | 🔄 进行中 | 7 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | 9 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -140,7 +140,7 @@
   **覆盖 AC**：AC-03、AC-27
   **依赖**：无
 
-- [ ] **T008**: 资源清单与名称解析测试（先红）
+- [x] **T008**: 资源清单与名称解析测试（先红）
   **文件**：`src/backend/test/workflow/copilot/test_resources.py`
   **测试**：
   - 唯一匹配填 id，且 id 为数字（design 坑 7）。
@@ -155,7 +155,7 @@
   **覆盖 AC**：AC-14、AC-15、AC-16、AC-26
   **依赖**：T002
 
-- [ ] **T009**: 资源清单与名称解析实现
+- [x] **T009**: 资源清单与名称解析实现
   **文件**：
   - `src/backend/bisheng/workflow/domain/services/copilot/{__init__,resources}.py`
   - `src/backend/test/workflow/copilot/__init__.py`（若 `test/workflow/` 下没有，一并补）

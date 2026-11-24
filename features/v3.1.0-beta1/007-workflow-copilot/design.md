@@ -123,6 +123,12 @@
   - **知识库**：`KnowledgeService.get_knowledge(request, login_user, knowledge_type, …, action="use")`（classmethod）。它返回游标分页（每页 10 条），所以要对两类知识库（文档库 0、问答库 1）分别翻完所有页。
   - **工具**：`ToolServices(login_user=…).get_tool_list(is_preset=None, action="use")`。这是实例方法，`use` 分支按 `batch_check_business_actions(actions=("use",))` 过滤，返回的每个子工具都带 `node_template`，可以直接交给编译器。
   - **模型**：`LLMService.get_all_llm` 返回模型服务列表，**没有** `use` 语义，也不过滤下线的模型。copilot 自己筛选：类型为 LLM，且 `online=True`（`llm_server.py:73`）。这和画布模型下拉框的口径一致（下拉框用的也是这个列表），模型不按用户分权限。
+  - **Agent 节点的模型**（参数类型 `agent_model`）另算，与平台一致：
+    - 可用范围是助手模型列表（`LLMService.get_assistant_llm().llm_list`，同样只算已上线的）；
+    - 默认值是其中标了 `default` 的那个。
+
+    依据：画布上 Agent 节点的模型下拉框用的就是助手模型（`ModelItem.tsx` `useModel('assistant')`）；前端导入跨环境工作流时，也是按这个规则换模型（`flowUtils.ts` 353–364 行：`bisheng_model` 换成工作流默认模型，`agent_model` 换成助手默认模型）。用户 2026-11-24 确认。
+  - **默认值只填哪些参数**：照前端导入时的范围，只填 `rag` / `llm` / `agent` / `qa_retriever` 节点里的模型参数；对话输入节点上可选的「推荐模型」不填。
 - **唯一匹配**：填入 id。
 - **无匹配或多个候选**：
   - 模型填 `0`，知识库填空列表。这两个占位值都能通过编译，平台既有的保存 / 运行校验会在用户没选时拦住。
