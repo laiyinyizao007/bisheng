@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003 -- Chinese test copy with full-width punctuation
 """F007 AC-23: the platform runs the very same declaration rules as the ``bisheng`` CLI.
 
 The rules live once in ``src/backend/bisheng_flow_dsl`` (design decision 1). The CLI side is
@@ -37,7 +36,7 @@ def _load_example(path: Path) -> dict:
         return (path.parent / loader.construct_scalar(node)).read_bytes().decode("utf-8")
 
     _Loader.add_constructor("!include", _include)
-    return yaml.load(path.read_bytes().decode("utf-8"), Loader=_Loader)  # noqa: S506 -- SafeLoader subclass
+    return yaml.load(path.read_bytes().decode("utf-8"), Loader=_Loader)
 
 
 def test_backend_imports_the_shared_package_directory():

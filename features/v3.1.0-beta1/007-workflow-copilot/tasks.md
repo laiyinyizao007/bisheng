@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | ✅ 已拆解 | codex tasks 审查两轮；第二轮唯一的 high（AC-05 无保障）由用户选定「copilot 层走向检查」解决 |
-| 实现 | 🔄 进行中 | 9 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | 🔄 进行中 | 11 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -163,7 +163,7 @@
   **测试**：T008 全部通过
   **依赖**：T008
 
-- [ ] **T010**: 合并与布局测试（先红）
+- [x] **T010**: 合并与布局测试（先红）
   **文件**：`src/backend/test/workflow/copilot/test_merge.py`
   **测试**：
   - 新增、删除、改参、改连线各自正确。
@@ -176,7 +176,7 @@
   **覆盖 AC**：AC-08、AC-09、AC-17、AC-18
   **依赖**：T002
 
-- [ ] **T011**: 合并与布局实现
+- [x] **T011**: 合并与布局实现
   **文件**：`src/backend/bisheng/workflow/domain/services/copilot/merge.py`
   **测试**：T010 全部通过
   **依赖**：T010
