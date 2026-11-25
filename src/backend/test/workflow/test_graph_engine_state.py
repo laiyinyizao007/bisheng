@@ -164,15 +164,33 @@ def test_engine_export_and_import_restore_counters_and_status():
     assert fresh.graph.get_state(fresh.graph_config).next == ("b",)
 
 
-def test_import_rejects_a_snapshot_for_other_nodes():
+def test_import_skips_counters_of_nodes_that_no_longer_exist():
+    """A deploy between pause and resume must not strand sessions over a counter."""
     saver, graph, _ = _run_to_pause()
-    data = _stub_engine(saver, graph, {"a": 1, "b": 0, "c": 0}).export_run_state()
+    data = _stub_engine(saver, graph, {"a": 4, "b": 0, "c": 0, "gone": 9}).export_run_state()
 
     new_saver = MemorySaver()
     new_graph, _ = _build(new_saver)
-    other = _stub_engine(new_saver, new_graph, {"a": 0, "z": 0})
+    fresh = _stub_engine(new_saver, new_graph, {"a": 0, "b": 0, "c": 0})
+    fresh.import_run_state(data)
+    assert fresh.nodes_map["a"].current_step == 4
+    assert fresh.graph.get_state(fresh.graph_config).next == ("b",)
+
+
+def test_import_rejects_an_incomplete_snapshot():
+    saver, graph, _ = _run_to_pause()
+    data = _stub_engine(saver, graph, {"a": 0, "b": 0, "c": 0}).export_run_state()
+    del data["graph_state"]
+    new_saver = MemorySaver()
+    new_graph, _ = _build(new_saver)
     with pytest.raises(run_state.RunStateError):
-        other.import_run_state(data)
+        _stub_engine(new_saver, new_graph, {"a": 0, "b": 0, "c": 0}).import_run_state(data)
+
+
+def test_the_export_records_the_langgraph_version():
+    saver, graph, _ = _run_to_pause()
+    data = _stub_engine(saver, graph, {"a": 0, "b": 0, "c": 0}).export_run_state()
+    assert data["langgraph"] == run_state.langgraph_version() != ""
 
 
 def test_import_rejects_an_unknown_format_version():

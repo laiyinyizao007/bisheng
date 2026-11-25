@@ -442,6 +442,7 @@ class GraphEngine:
             raise run_state.RunStateError("the workflow has no checkpoint to save")
         return {
             "format": run_state.FORMAT_VERSION,
+            "langgraph": run_state.langgraph_version(),
             "status": self.status,
             "checkpoint": checkpoint,
             "graph_state": run_state.dump_graph_state(self.graph_state),
@@ -453,12 +454,20 @@ class GraphEngine:
         if not isinstance(data, dict) or data.get("format") != run_state.FORMAT_VERSION:
             raise run_state.RunStateError("the saved run state has an unsupported format")
         steps = data.get("steps")
-        if not isinstance(steps, dict) or set(steps) != set(self._step_counters()):
-            raise run_state.RunStateError("the saved run state does not match the workflow definition")
+        if not isinstance(steps, dict) or not all(k in data for k in ("checkpoint", "graph_state", "status")):
+            raise run_state.RunStateError("the saved run state is incomplete")
+        saved_version = data.get("langgraph")
+        if saved_version and saved_version != run_state.langgraph_version():
+            logger.warning(
+                "pause state was saved with langgraph {} and is restored with {}", saved_version, run_state.langgraph_version()
+            )
         run_state.load_checkpoint(self._saver, self.graph_config, data["checkpoint"])
         run_state.load_graph_state(self.graph_state, data["graph_state"])
+        counters = self._step_counters()
         for node_id, count in steps.items():
-            self.nodes_map[node_id].current_step = count
+            # A node that no longer keeps a counter is skipped; the counter only bounds loops.
+            if node_id in counters and isinstance(count, int):
+                self.nodes_map[node_id].current_step = count
         self.status = data["status"]
         self.reason = ""
 

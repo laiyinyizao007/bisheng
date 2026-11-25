@@ -183,6 +183,33 @@ class FakeRedisCallback:
     def get_user_input(self):
         return FakeRedisCallback.user_input
 
+    def get_workflow_status(self):
+        return None
+
+
+class FakePauseStore:
+    """These tests are about memory turns; pause-state storage is covered by test_pause_resume_tasks."""
+
+    def acquire_resume(self, unique_id):
+        return "owner"
+
+    def release_resume(self, unique_id, owner):
+        pass
+
+    def ensure_not_expired(self, unique_id):
+        pass
+
+    def paused_at(self, unique_id):
+        return None
+
+    def load(self, *args, **kwargs):
+        from bisheng.workflow.domain.services.pause_state import PauseStateNotFound
+
+        raise PauseStateNotFound()
+
+    def delete(self, unique_id):
+        pass
+
 
 class FakeWorkflow:
     """Stands in for Workflow; ``outcome`` drives the status or raises."""
@@ -217,6 +244,7 @@ def worker(monkeypatch, memory_db):
     monkeypatch.setattr(tasks, "_save_pause_state", Mock())
     monkeypatch.setattr(tasks, "_extend_session_record", Mock())
     monkeypatch.setattr(tasks, "_drop_pause_state", Mock())
+    monkeypatch.setattr(tasks, "_continue_store", lambda conf: FakePauseStore())
     monkeypatch.setattr(
         tasks.FlowDao, "get_flow_by_id", Mock(return_value=SimpleNamespace(name="报销流程", tenant_id=1, user_id=1))
     )

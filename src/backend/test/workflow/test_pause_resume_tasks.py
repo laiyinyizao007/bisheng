@@ -194,3 +194,89 @@ async def test_a_stale_warm_copy_is_not_used_after_another_worker_continued_the_
         frames = await socket.until("processing", "close")
     assert not [f for f in frames if f["category"] == "error"]
     assert h.model.invoke.call_count == 1
+
+
+def _unique_id(h):
+    return _keys(h, ":pause")[0].split(":")[1]
+
+
+async def _settle():
+    import asyncio
+
+    await asyncio.sleep(0.5)
+
+
+async def test_a_second_continue_does_not_run_while_another_task_owns_the_session(dialogue):
+    """The token guards the warm path too: with the token taken, the continue task exits and runs nothing."""
+    h = dialogue
+    async with Socket(h.app) as socket:
+        prompt = await initialize(socket)
+        unique_id = _unique_id(h)
+        h.cache.set(f"workflow:{unique_id}:pause_lock", "someone-else")
+        await socket.send(answer(prompt))
+        await _settle()
+    assert h.model.invoke.call_count == 0
+    assert h.cache.get(f"workflow:{unique_id}:pause_lock") == "someone-else"  # the loser left it alone
+    assert len(_keys(h, ":pause")) == 1  # the saved state is untouched
+
+
+async def test_a_session_stopped_before_the_continue_is_not_resurrected(dialogue):
+    h = dialogue
+    async with Socket(h.app) as socket:
+        prompt = await initialize(socket)
+        unique_id = _unique_id(h)
+        status = h.cache.get(f"workflow:{unique_id}:status")
+        h.cache.set(f"workflow:{unique_id}:status", {**status, "status": "FAILED", "reason": "workflow stop by user"})
+        await socket.send(answer(prompt))
+        await _settle()
+    assert h.model.invoke.call_count == 0
+    assert h.cache.get(f"workflow:{unique_id}:status")["status"] == "FAILED"
+
+
+async def test_a_redis_outage_while_continuing_keeps_the_saved_state(dialogue):
+    """Nothing ran yet, so the saved state must survive and the session goes back to waiting."""
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    h = dialogue
+    async with Socket(h.app) as socket:
+        prompt = await initialize(socket)
+        unique_id = _unique_id(h)
+        original = h.cache.setNx
+
+        def down(*args, **kwargs):
+            raise RedisConnectionError("redis down")
+
+        h.cache.setNx = down
+        try:
+            await socket.send(answer(prompt))
+            await _settle()
+        finally:
+            h.cache.setNx = original
+    assert h.model.invoke.call_count == 0
+    assert len(_keys(h, ":pause")) == 1 and len(_keys(h, ":pause_meta")) == 1
+    assert h.cache.get(f"workflow:{unique_id}:status")["status"] == "INPUT"
+
+
+async def test_a_redis_outage_at_the_pause_does_not_lose_the_run(dialogue):
+    """The in-memory copy comes first: without Redis the session still works on this Worker."""
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    h = dialogue
+    original = h.cache.set
+
+    def flaky(key, value, **kwargs):
+        if key.endswith((":pause", ":pause_meta")):
+            raise RedisConnectionError("redis down")
+        return original(key, value, **kwargs)
+
+    h.cache.set = flaky
+    try:
+        async with Socket(h.app) as socket:
+            prompt = await initialize(socket)
+            assert _keys(h, ":pause") == []  # nothing could be saved
+            await socket.send(answer(prompt))
+            frames = await socket.until("processing", "close")
+    finally:
+        h.cache.set = original
+    assert not [f for f in frames if f["category"] == "error"]
+    assert h.model.invoke.call_count == 1

@@ -24,6 +24,15 @@ from bisheng.workflow.graph.graph_state import GraphState
 
 FORMAT_VERSION = 1
 
+
+def langgraph_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("langgraph")
+    except PackageNotFoundError:
+        return ""
+
 _serde = JsonPlusSerializer()
 
 

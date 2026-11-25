@@ -27,12 +27,15 @@ from bisheng.worker.main import bisheng_celery
 from bisheng.worker.tenant_context import PermissionTaskTenantContextError, durable_workload_scope
 from bisheng.worker.utils.stateful_worker import StatefulWorker
 from bisheng.worker.workflow.redis_callback import RedisCallback
+from redis.exceptions import RedisError
+
 from bisheng.core.config.settings import DEFAULT_PAUSE_RETENTION_SECONDS
 from bisheng.worker.workflow import redis_callback as _callback_module
 from bisheng.workflow.common.workflow import WorkflowStatus
 from bisheng.workflow.graph.workflow import Workflow
 from bisheng.workflow.domain.services.pause_state import (
     EXPIRED_NOTICE_GRACE_SECONDS,
+    RESUME_LOCK_SECONDS,
     PauseStateNotFound,
     PauseStateStore,
 )
@@ -47,17 +50,36 @@ _global_workflow: dict[str, Workflow] = {}
 _global_workflow_pause_stamp: dict[str, float] = {}
 
 
+def _redis_client():
+    # looked up at call time so tests (and the callback module) can swap the client
+    return _callback_module.get_redis_client_sync()
+
+
 def _pause_store() -> PauseStateStore:
-    """The store on the same Redis client the workflow callbacks use."""
+    """The store for saving a pause; needs the retention period from the workflow settings."""
     conf = settings.get_workflow_conf()
-    retention = getattr(conf, "pause_retention_seconds", DEFAULT_PAUSE_RETENTION_SECONDS)
-    return PauseStateStore(_callback_module.get_redis_client_sync(), retention)
+    return PauseStateStore(_redis_client(), getattr(conf, "pause_retention_seconds", DEFAULT_PAUSE_RETENTION_SECONDS))
+
+
+def _light_pause_store() -> PauseStateStore:
+    """A store for operations that never read the settings (delete, stamps, expiry checks)."""
+    return PauseStateStore(_redis_client(), DEFAULT_PAUSE_RETENTION_SECONDS)
+
+
+def _continue_store(workflow_conf) -> PauseStateStore:
+    """The store a continue task uses; the resume token lives as long as one run may last."""
+    run_limit = int(getattr(workflow_conf, "timeout", 0) or 0) * 60 + 60
+    return PauseStateStore(
+        _redis_client(),
+        getattr(workflow_conf, "pause_retention_seconds", DEFAULT_PAUSE_RETENTION_SECONDS),
+        lock_seconds=max(RESUME_LOCK_SECONDS, run_limit),
+    )
 
 
 def _drop_pause_state(unique_id: str):
     """The run ended or was stopped: its saved pause state is no longer needed (best effort)."""
     try:
-        _pause_store().delete(unique_id)
+        _light_pause_store().delete(unique_id)
     except Exception:
         logger.warning("workflow pause state could not be removed unique_id={}", unique_id)
 
@@ -104,7 +126,10 @@ def _judge_workflow_status(redis_callback: RedisCallback, workflow: Workflow):
         _clear_workflow_obj(redis_callback.unique_id)
         return
     if workflow.status() == WorkflowStatus.INPUT.value:
-        # F002: save the resumable state first, so any Worker can continue this session
+        # Keep the object in memory as a warm cache for the Worker that paused it. This comes first,
+        # so a Redis hiccup below never costs the run (the behaviour before F002).
+        _global_workflow[redis_callback.unique_id] = workflow
+        # F002: also save the resumable state, so any Worker can continue this session
         try:
             _save_pause_state(redis_callback, workflow)
         except RunStateError as e:
@@ -114,10 +139,14 @@ def _judge_workflow_status(redis_callback: RedisCallback, workflow: Workflow):
             )
             _clear_workflow_obj(redis_callback.unique_id)
             return
-        # Keep the object in memory as a warm cache for the Worker that paused it
-        _global_workflow[redis_callback.unique_id] = workflow
+        except Exception as e:
+            # The store is unavailable: the session still works while this Worker lives.
+            logger.warning(f"workflow pause state could not be stored, keeping the in-memory copy only: {e}")
         redis_callback.set_workflow_status(status, reason)
-        _extend_session_record(redis_callback)
+        try:
+            _extend_session_record(redis_callback)
+        except Exception:
+            logger.warning("workflow session record lifetime could not be extended")
         return
     logger.error(f"unexpected workflow status error: {status}")
     redis_callback.set_workflow_status(WorkflowStatus.FAILED.value, f"workflow run failed, unexpected status: {status}")
@@ -304,29 +333,23 @@ def _warm_copy_is_current(store: PauseStateStore, unique_id: str) -> bool:
     return mine is None or newest is None or mine == newest
 
 
-def _restore_paused_workflow(redis_callback: RedisCallback, workflow_id: str, chat_id: str, user_id: int):
+def _restore_paused_workflow(redis_callback: RedisCallback, workflow_id: str, chat_id: str, user_id: int, store, conf):
     """F002: rebuild a paused run from its saved state when this Worker does not hold it in memory.
 
-    Returns ``(workflow, True)`` and the caller must release the resume token afterwards, or
-    ``(None, False)`` when another continue task already owns this session.
-    Raises ``PauseStateNotFound``-as-plain-error for sessions that never saved state (old behaviour),
-    and the pause-state error codes for expired or unusable state.
+    The caller already holds the resume token, so the snapshot read here is the newest one.
+    Sessions that never saved state keep the old failure; expired or unusable state raises
+    the pause-state error codes.
     """
     unique_id = redis_callback.unique_id
-    store = _pause_store()
     try:
         snapshot = store.load(unique_id, tenant_id=get_current_tenant_id(), workflow_id=workflow_id)
     except PauseStateNotFound:
         raise Exception("workflow object not found maybe data is expired") from None
-    if not store.acquire_resume(unique_id):
-        logger.warning(f"workflow continue skipped, another task owns session unique_id={unique_id}")
-        return None, False
+    workflow_info = FlowDao.get_flow_by_id(workflow_id)
+    flow_tenant_id = getattr(workflow_info, "tenant_id", None)
+    if flow_tenant_id is None or flow_tenant_id != get_current_tenant_id():
+        raise PermissionTaskTenantContextError("workflow tenant disagrees with persistent target")
     try:
-        workflow_info = FlowDao.get_flow_by_id(workflow_id)
-        flow_tenant_id = getattr(workflow_info, "tenant_id", None)
-        if flow_tenant_id is None or flow_tenant_id != get_current_tenant_id():
-            raise PermissionTaskTenantContextError("workflow tenant disagrees with persistent target")
-        workflow_conf = settings.get_workflow_conf()
         with chat_credits.billing_context(source_type="workflow", source_id=str(workflow_id)):
             workflow = Workflow(
                 workflow_id,
@@ -334,8 +357,8 @@ def _restore_paused_workflow(redis_callback: RedisCallback, workflow_id: str, ch
                 user_id,
                 snapshot.canvas,
                 False,
-                workflow_conf.max_steps,
-                workflow_conf.timeout,
+                conf.max_steps,
+                conf.timeout,
                 redis_callback,
                 tenant_id=flow_tenant_id,
                 flow_user_id=getattr(workflow_info, "user_id", None),
@@ -344,14 +367,19 @@ def _restore_paused_workflow(redis_callback: RedisCallback, workflow_id: str, ch
             )
         redis_callback.workflow = workflow
         workflow.graph_engine.import_run_state(snapshot.run_state)
-        logger.info(f"workflow restored from pause state unique_id={unique_id}")
-        return workflow, True
     except RunStateError as e:
-        store.release_resume(unique_id)
         raise WorkFlowPauseStateInvalidError(exception=str(e)) from e
-    except BaseException:
-        store.release_resume(unique_id)
-        raise
+    logger.info(f"workflow restored from pause state unique_id={unique_id}")
+    return workflow
+
+
+def _store_unavailable(error: BaseException) -> bool:
+    return isinstance(error, (RedisError, ConnectionError, TimeoutError))
+
+
+def _session_was_stopped(redis_callback: RedisCallback) -> bool:
+    info = redis_callback.get_workflow_status()
+    return bool(info) and info.get("status") == WorkflowStatus.FAILED.value
 
 
 def _continue_workflow(unique_id: str, workflow_id: str, chat_id: str, user_id: int, source: str = "platform"):
@@ -359,22 +387,31 @@ def _continue_workflow(unique_id: str, workflow_id: str, chat_id: str, user_id: 
     redis_callback = RedisCallback(unique_id, workflow_id, chat_id, user_id, source=source)
     memory_chat_id = _memory_chat_id(chat_id, source)
     memory_enabled = None
-    holds_resume_token = False
+    store = None
+    resume_owner = None
+    run_started = False
     try:
+        conf = settings.get_workflow_conf()
+        store = _continue_store(conf)
+        # Exactly one task continues a session, on every path (warm copy or rebuild).
+        resume_owner = store.acquire_resume(unique_id)
+        if resume_owner is None:
+            logger.warning(f"workflow continue skipped, another task owns session unique_id={unique_id}")
+            return
+        if _session_was_stopped(redis_callback):
+            logger.info(f"workflow continue skipped, session was stopped unique_id={unique_id}")
+            return
         workflow = _global_workflow.get(redis_callback.unique_id, None)
         if workflow:
-            store = _pause_store()
             # the warm copy must not outlive the retention period either
-            store.ensure_not_expired(redis_callback.unique_id)
-            if not _warm_copy_is_current(store, redis_callback.unique_id):
+            store.ensure_not_expired(unique_id)
+            if not _warm_copy_is_current(store, unique_id):
                 # another Worker continued this session since; this copy is stale, rebuild from Redis
-                _global_workflow.pop(redis_callback.unique_id, None)
-                _global_workflow_pause_stamp.pop(redis_callback.unique_id, None)
+                _global_workflow.pop(unique_id, None)
+                _global_workflow_pause_stamp.pop(unique_id, None)
                 workflow = None
         if not workflow:
-            workflow, holds_resume_token = _restore_paused_workflow(redis_callback, workflow_id, chat_id, user_id)
-            if workflow is None:
-                return
+            workflow = _restore_paused_workflow(redis_callback, workflow_id, chat_id, user_id, store, conf)
         if workflow.tenant_id != get_current_tenant_id() or workflow.workflow_id != workflow_id:
             raise PermissionTaskTenantContextError("cached workflow target mismatch")
         # a resumed run keeps the switch read at its start (R5)
@@ -385,6 +422,7 @@ def _continue_workflow(unique_id: str, workflow_id: str, chat_id: str, user_id: 
         if not user_input:
             raise IgnoreException("workflow continue not found user input")
         redis_callback.set_workflow_status(WorkflowStatus.RUNNING.value)
+        run_started = True
         with chat_credits.billing_context(source_type="workflow", source_id=str(workflow_id)):
             _status, _reason = workflow.run(user_input)
         _judge_workflow_status(redis_callback, workflow)
@@ -397,13 +435,22 @@ def _continue_workflow(unique_id: str, workflow_id: str, chat_id: str, user_id: 
         redis_callback.set_workflow_status(WorkflowStatus.FAILED.value, encode_workflow_error(e))
         _clear_workflow_obj(redis_callback.unique_id)
     except Exception as e:
-        logger.exception("continue_workflow error")
-        redis_callback.set_workflow_status(WorkflowStatus.FAILED.value, str(e)[:100])
-        _clear_workflow_obj(redis_callback.unique_id)
-    finally:
-        if holds_resume_token:
+        if not run_started and _store_unavailable(e):
+            # Nothing ran yet and the saved state is untouched: do not destroy it. Put the session back
+            # to waiting (best effort) so the user can send the input again once Redis is back.
+            logger.warning(f"continue_workflow could not reach the state store, session kept: {type(e).__name__}")
             try:
-                _pause_store().release_resume(unique_id)
+                redis_callback.set_workflow_status(WorkflowStatus.INPUT.value, "state store unavailable, retry later")
+            except Exception:
+                logger.warning("continue_workflow could not put the session back to waiting")
+        else:
+            logger.exception("continue_workflow error")
+            redis_callback.set_workflow_status(WorkflowStatus.FAILED.value, str(e)[:100])
+            _clear_workflow_obj(redis_callback.unique_id)
+    finally:
+        if resume_owner:
+            try:
+                store.release_resume(unique_id, resume_owner)
             except Exception:
                 logger.warning(f"workflow resume token could not be released unique_id={unique_id}")
         _end_memory_turn(memory_chat_id, memory_enabled, user_id)

@@ -161,17 +161,38 @@ def test_delete_removes_state_and_marker(env):
 
 def test_only_one_caller_gets_the_resume_token(env):
     store, _, _ = env
-    assert store.acquire_resume("u1") is True
-    assert store.acquire_resume("u1") is False
-    store.release_resume("u1")
-    assert store.acquire_resume("u1") is True
+    owner = store.acquire_resume("u1")
+    assert owner
+    assert store.acquire_resume("u1") is None
+    store.release_resume("u1", owner)
+    assert store.acquire_resume("u1")
 
 
 def test_resume_token_expires_by_itself(env):
     store, _, clock = env
-    assert store.acquire_resume("u1") is True
+    assert store.acquire_resume("u1")
     clock.now += pause_state.RESUME_LOCK_SECONDS + 1
-    assert store.acquire_resume("u1") is True
+    assert store.acquire_resume("u1")
+
+
+def test_a_late_release_does_not_free_the_next_holders_token(env):
+    store, _, clock = env
+    first = store.acquire_resume("u1")
+    clock.now += pause_state.RESUME_LOCK_SECONDS + 1  # the first holder's token expired
+    second = store.acquire_resume("u1")
+    assert second
+    store.release_resume("u1", first)  # the first holder finishes late
+    assert store.acquire_resume("u1") is None  # the second holder still owns it
+    store.release_resume("u1", second)
+    assert store.acquire_resume("u1")
+
+
+def test_the_token_lifetime_follows_the_configured_limit(env):
+    store, redis, clock = env
+    store.lock_seconds = 100
+    assert store.acquire_resume("u1")
+    clock.now += 101
+    assert store.acquire_resume("u1")
 
 
 def test_redis_failure_is_not_reported_as_expiry(env):
@@ -232,3 +253,31 @@ def test_an_oversized_snapshot_is_refused_with_a_readable_reason(env, monkeypatc
         store.save("u1", tenant_id=7, workflow_id="wf1", canvas={"nodes": ["x" * 500]}, run_state=RUN_STATE)
     assert "too large" in str(exc.value)
     assert redis.get("workflow:u1:pause") is None
+
+
+def test_a_snapshot_with_non_text_keys_fails_readably_instead_of_crashing(env):
+    store, _, _ = env
+    with pytest.raises(RunStateError):
+        store.save("u1", tenant_id=7, workflow_id="wf1", canvas={(1, 2): "x"}, run_state=RUN_STATE)
+
+
+def test_the_size_cap_counts_bytes_not_characters(env, monkeypatch):
+    store, _, _ = env
+    monkeypatch.setattr(pause_state, "MAX_SNAPSHOT_BYTES", 300)
+    chinese = {"nodes": ["节" * 90]}  # about 90 characters but about 270 bytes
+    with pytest.raises(RunStateError):
+        store.save("u1", tenant_id=7, workflow_id="wf1", canvas=chinese, run_state=RUN_STATE)
+
+
+def test_the_marker_is_written_before_the_snapshot(env):
+    store, redis, _ = env
+    order = []
+    original = redis.set
+
+    def spy(key, *a, **k):
+        order.append(key)
+        return original(key, *a, **k)
+
+    redis.set = spy
+    _save(store)
+    assert order == ["workflow:u1:pause_meta", "workflow:u1:pause"]
