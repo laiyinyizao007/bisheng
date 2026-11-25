@@ -183,3 +183,18 @@ def test_import_rejects_an_unknown_format_version():
     new_graph, _ = _build(new_saver)
     with pytest.raises(run_state.RunStateError):
         _stub_engine(new_saver, new_graph, {"a": 0, "b": 0, "c": 0}).import_run_state(data)
+
+
+def test_nodes_without_a_step_counter_are_skipped():
+    saver, graph, _ = _run_to_pause()
+    engine = _stub_engine(saver, graph, {"a": 2, "b": 0, "c": 0})
+    engine.nodes_map["b_fake"] = SimpleNamespace()  # e.g. the output placeholder node
+    data = engine.export_run_state()
+    assert set(data["steps"]) == {"a", "b", "c"}
+
+    new_saver = MemorySaver()
+    new_graph, _ = _build(new_saver)
+    fresh = _stub_engine(new_saver, new_graph, {"a": 0, "b": 0, "c": 0})
+    fresh.nodes_map["b_fake"] = SimpleNamespace()
+    fresh.import_run_state(data)
+    assert fresh.nodes_map["a"].current_step == 2

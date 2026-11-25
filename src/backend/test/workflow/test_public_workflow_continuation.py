@@ -65,6 +65,15 @@ class MemoryRedis:
     def delete(self, key):
         self.values.pop(key, None)
 
+    def setNx(self, key, value, **kwargs):
+        if key in self.values:
+            return False
+        self.values[key] = deepcopy(value)
+        return True
+
+    def expire_key(self, key, expiration):
+        pass
+
     def rpush(self, key, value, **kwargs):
         self.events.setdefault(key, []).append(value)
 

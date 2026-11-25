@@ -213,6 +213,10 @@ def worker(monkeypatch, memory_db):
     tasks = import_worker_tasks()
     monkeypatch.setattr(tasks, "RedisCallback", FakeRedisCallback)
     monkeypatch.setattr(tasks, "Workflow", FakeWorkflow)
+    # These tests are about memory turns; saving pause state to Redis is covered by test_pause_resume_tasks.
+    monkeypatch.setattr(tasks, "_save_pause_state", Mock())
+    monkeypatch.setattr(tasks, "_extend_session_record", Mock())
+    monkeypatch.setattr(tasks, "_drop_pause_state", Mock())
     monkeypatch.setattr(
         tasks.FlowDao, "get_flow_by_id", Mock(return_value=SimpleNamespace(name="报销流程", tenant_id=1, user_id=1))
     )

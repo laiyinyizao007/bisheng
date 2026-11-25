@@ -428,6 +428,10 @@ class GraphEngine:
                     self.status = WorkflowStatus.INPUT.value
                     return
 
+    def _step_counters(self) -> dict:
+        """Run counters of the nodes that keep one (helper nodes such as the output placeholder have none)."""
+        return {node_id: node.current_step for node_id, node in self.nodes_map.items() if hasattr(node, "current_step")}
+
     def export_run_state(self) -> dict:
         """Everything needed to continue this paused run in a freshly built engine (F002).
 
@@ -441,7 +445,7 @@ class GraphEngine:
             "status": self.status,
             "checkpoint": checkpoint,
             "graph_state": run_state.dump_graph_state(self.graph_state),
-            "steps": {node_id: node.current_step for node_id, node in self.nodes_map.items()},
+            "steps": self._step_counters(),
         }
 
     def import_run_state(self, data: dict) -> None:
@@ -449,7 +453,7 @@ class GraphEngine:
         if not isinstance(data, dict) or data.get("format") != run_state.FORMAT_VERSION:
             raise run_state.RunStateError("the saved run state has an unsupported format")
         steps = data.get("steps")
-        if not isinstance(steps, dict) or set(steps) != set(self.nodes_map):
+        if not isinstance(steps, dict) or set(steps) != set(self._step_counters()):
             raise run_state.RunStateError("the saved run state does not match the workflow definition")
         run_state.load_checkpoint(self._saver, self.graph_config, data["checkpoint"])
         run_state.load_graph_state(self.graph_state, data["graph_state"])

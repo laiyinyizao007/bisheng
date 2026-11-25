@@ -63,13 +63,6 @@ class PauseStateStore:
         self.retention_seconds = int(retention_seconds)
         self.clock = clock
 
-    @classmethod
-    def default(cls) -> "PauseStateStore":
-        from bisheng.core.cache.redis_manager import get_redis_client_sync
-        from bisheng.common.services.config_service import settings
-
-        return cls(get_redis_client_sync(), settings.get_workflow_conf().pause_retention_seconds)
-
     def save(self, unique_id: str, *, tenant_id: int, workflow_id: str, canvas: dict, run_state: dict) -> None:
         now = self.clock()
         expires_at = now + self.retention_seconds
