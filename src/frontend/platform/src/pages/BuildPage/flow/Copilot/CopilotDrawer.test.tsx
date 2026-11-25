@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     stream: vi.fn(),
     confirm: vi.fn(),
     translate: vi.fn((key: string) => key),
+    scroll: vi.fn(),
 }));
 
 vi.mock("@/controllers/API/workflowCopilot", () => ({
@@ -18,7 +19,10 @@ vi.mock("@/controllers/API/workflowCopilot", () => ({
 }));
 vi.mock("@/components/bs-ui/alertDialog/useConfirm", () => ({ bsConfirm: mocks.confirm }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => mocks.translate(key) }) }));
-vi.mock("bisheng-icons", () => ({ Outlined: { Close: () => null } }));
+vi.mock("bisheng-icons", () => ({ Outlined: new Proxy({}, { get: () => () => null }) }));
+vi.mock("@/components/bs-comp/appChat/PlatformChatMarkdown", () => ({
+    PlatformChatMarkdown: ({ content }: { content: string }) => <div>{content}</div>,
+}));
 vi.mock("@bisheng/ui", () => ({
     Button: ({ children, onClick, disabled, "aria-label": ariaLabel }: { children?: unknown; onClick?: () => void; disabled?: boolean; "aria-label"?: string }) => (
         <button type="button" onClick={onClick} disabled={disabled} aria-label={ariaLabel}>
@@ -27,6 +31,15 @@ vi.mock("@bisheng/ui", () => ({
     ),
 }));
 vi.mock("@bisheng/chat", () => ({
+    useConversationScroll: mocks.scroll,
+    MessageBubble: (props: { reasoning?: unknown; children?: unknown; status?: unknown; pending?: boolean; hideBody?: boolean }) => (
+        <div>
+            {props.reasoning as never}
+            {!props.hideBody && (props.children as never)}
+            {!props.hideBody && props.pending && <span data-testid="bubble-pending" />}
+            {props.status as never}
+        </div>
+    ),
     ConversationComposer: (props: {
         inputRef: { current: HTMLTextAreaElement | null };
         canExecute: boolean;
@@ -155,13 +168,14 @@ describe("a turn", () => {
         expect(props.onApply).toHaveBeenCalledTimes(1);
     });
 
-    it("discarding leaves the canvas alone (AC-20)", async () => {
-        mocks.stream.mockImplementation(streamOf(proposalEvents()));
+    it("discarding leaves the canvas alone (AC-20) and says so in the progress", async () => {
+        mocks.stream.mockImplementation(streamOf([proposalEvents()[0], { type: "draft", text: "nodes: []\n" }, ...proposalEvents().slice(1)]));
         const { props } = renderDrawer();
         await send("add a summary node");
         fireEvent.click(await screen.findByText("Discard"));
         expect(props.onApply).not.toHaveBeenCalled();
         expect(screen.queryByText("Apply")).toBeNull();
+        expect(screen.getByTestId("copilot-progress-title")).toHaveTextContent("Discarded");
     });
 
     it("shows issues and errors instead of a proposal", async () => {
@@ -196,13 +210,15 @@ describe("a turn", () => {
         expect(screen.getByTestId("copilot-needs")).toHaveTextContent("tool_1: send_mail");
     });
 
-    it("a retry replaces the rejected attempt's streamed text", async () => {
+    it("a retry replaces the rejected attempt's streamed text and is listed in the progress", async () => {
         mocks.stream.mockImplementation(
             streamOf([
                 { type: "status", stage: "generating", attempt: 1 },
                 { type: "delta", text: "first try" },
+                { type: "draft", text: "nodes: [broken" },
                 { type: "status", stage: "retrying", attempt: 2 },
                 { type: "delta", text: "second try" },
+                { type: "draft", text: "nodes: []\n" },
                 { type: "issues", issues: ["still wrong"] },
                 { type: "done" },
             ]),
@@ -212,6 +228,11 @@ describe("a turn", () => {
         await screen.findByTestId("copilot-issues");
         expect(screen.queryByText(/first try/)).toBeNull();
         expect(screen.getByText(/second try/)).toBeInTheDocument();
+        expect(screen.getByTestId("copilot-progress-title")).toHaveTextContent("The proposal did not validate");
+        fireEvent.click(screen.getByRole("button", { expanded: false }));
+        expect(screen.getByTestId("copilot-progress")).toHaveTextContent("#1"); // the rejected attempt, by its fallback copy
+        expect(screen.getByTestId("copilot-draft")).toHaveTextContent("nodes: []");
+        expect(screen.queryByText(/broken/)).toBeNull();
     });
 
     it("a failed turn shows the error code's localized copy with the exception class (AC-27)", async () => {
@@ -244,20 +265,168 @@ describe("a turn", () => {
     });
 });
 
+/** A stream that yields ``before``, then waits for ``release()`` before yielding ``after``. */
+function gatedStream(before: CopilotEvent[], after: CopilotEvent[]) {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    mocks.stream.mockImplementation(async function* () {
+        for (const event of before) yield event;
+        await gate;
+        for (const event of after) yield event;
+    });
+    return () => act(async () => release());
+}
+
+describe("progress while generating (chat-style)", () => {
+    it("shows the spinner bubble until the first status arrives", async () => {
+        const release = gatedStream([], [{ type: "done" }]);
+        renderDrawer();
+        await send("x");
+        expect(screen.getByTestId("bubble-pending")).toBeInTheDocument();
+        await release();
+        expect(screen.queryByTestId("bubble-pending")).toBeNull();
+    });
+
+    it("streams the YAML into an open box, then folds it away with the proposal", async () => {
+        const [status, message, proposal, done] = proposalEvents();
+        const release = gatedStream(
+            [status, { type: "delta", text: "I will add a node." }, { type: "draft", text: "nodes:\n" }, { type: "draft", text: "  - id: new\n" }],
+            [{ type: "status", stage: "validating", attempt: 1 }, message, proposal, done],
+        );
+        renderDrawer();
+        await send("x");
+        expect(await screen.findByTestId("copilot-draft")).toHaveTextContent("- id: new");
+        expect(screen.getByTestId("copilot-progress-title")).toHaveTextContent("Generating…");
+        expect(screen.getByText("I will add a node.")).toBeInTheDocument();
+
+        await release();
+        await screen.findByTestId("copilot-diff");
+        expect(screen.getByTestId("copilot-progress-title")).toHaveTextContent("Proposal ready");
+        expect(screen.queryByTestId("copilot-draft")).toBeNull(); // folded
+        fireEvent.click(screen.getByRole("button", { expanded: false }));
+        expect(screen.getByTestId("copilot-draft")).toHaveTextContent("- id: new"); // still there to read
+    });
+
+    it("keeps the rejected attempt's text on screen until the retry says something", async () => {
+        const release = gatedStream(
+            [
+                { type: "status", stage: "generating", attempt: 1 },
+                { type: "delta", text: "first try" },
+                { type: "status", stage: "retrying", attempt: 2 },
+            ],
+            [{ type: "delta", text: "second try" }, { type: "issues", issues: ["no"] }, { type: "done" }],
+        );
+        renderDrawer();
+        await send("x");
+        expect(await screen.findByText("first try")).toBeInTheDocument();
+        expect(screen.getByTestId("copilot-progress-title")).toHaveTextContent("#2");
+        await release();
+        expect(await screen.findByText("second try")).toBeInTheDocument();
+        expect(screen.queryByText("first try")).toBeNull();
+    });
+
+    it("folds when the run ends even after being toggled by hand", async () => {
+        const [status, message, proposal, done] = proposalEvents();
+        const release = gatedStream([status, { type: "draft", text: "nodes: []\n" }], [message, proposal, done]);
+        renderDrawer();
+        await send("x");
+        await screen.findByTestId("copilot-draft");
+        fireEvent.click(screen.getByRole("button", { expanded: true })); // closed by hand
+        fireEvent.click(screen.getByRole("button", { expanded: false })); // and opened again
+        await release();
+        await screen.findByTestId("copilot-diff");
+        expect(screen.queryByTestId("copilot-draft")).toBeNull();
+    });
+
+    it("a reply still running counts as the user's, so sending resumes following", async () => {
+        const release = gatedStream([{ type: "status", stage: "generating", attempt: 1 }], [{ type: "message", text: "ok" }, { type: "done" }]);
+        renderDrawer();
+        await send("x");
+        const kinds = () => (mocks.scroll.mock.lastCall?.[0] as { messages: { kind: string }[] }).messages.map((m) => m.kind);
+        expect(kinds()).toEqual(["user", "user"]);
+        await release();
+        await waitFor(() => expect(kinds()).toEqual(["user", "answer"]));
+    });
+
+    it("a stopped turn's half-streamed text is not sent as history", async () => {
+        mocks.stream.mockImplementationOnce(async function* (_request: CopilotRequest, signal: AbortSignal) {
+            yield { type: "status", stage: "generating", attempt: 1 } as CopilotEvent;
+            yield { type: "delta", text: "half a sent" } as CopilotEvent;
+            await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+        });
+        renderDrawer();
+        await send("first");
+        await screen.findByText("half a sent");
+        fireEvent.click(screen.getByLabelText("stop"));
+        await screen.findByTestId("copilot-outcome");
+        mocks.stream.mockImplementation(streamOf(proposalEvents()));
+        await send("second");
+        const [request] = mocks.stream.mock.calls[1] as [CopilotRequest, AbortSignal];
+        expect(request.history).toEqual([{ role: "user", content: "first" }]);
+    });
+
+    it("a plain text answer leaves no progress box behind", async () => {
+        mocks.stream.mockImplementation(
+            streamOf([
+                { type: "status", stage: "generating", attempt: 1 },
+                { type: "delta", text: "Regex is a partial match." },
+                { type: "message", text: "Regex is a partial match." },
+                { type: "done" },
+            ]),
+        );
+        renderDrawer();
+        await send("is regex a full match?");
+        await waitFor(() => expect(screen.queryByTestId("copilot-progress")).toBeNull());
+        expect(screen.getByText("Regex is a partial match.")).toBeInTheDocument();
+    });
+});
+
 describe("stop and keep", () => {
     it("stop aborts the request and nothing is proposed (AC-11)", async () => {
         let seenSignal: AbortSignal | undefined;
         mocks.stream.mockImplementation(async function* (_request: CopilotRequest, signal: AbortSignal) {
             seenSignal = signal;
             yield { type: "status", stage: "generating", attempt: 1 } as CopilotEvent;
+            yield { type: "draft", text: "nodes:\n" } as CopilotEvent;
             await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
         });
         const { props } = renderDrawer();
         await send("x");
         fireEvent.click(await screen.findByLabelText("stop"));
         await waitFor(() => expect(screen.getByTestId("copilot-outcome")).toHaveTextContent("Stopped"));
+        expect(screen.getByTestId("copilot-progress-title")).toHaveTextContent("Stopped");
         expect(seenSignal?.aborted).toBe(true);
         expect(props.onApply).not.toHaveBeenCalled();
+    });
+
+    it("leaving the editor mid-turn aborts the request", async () => {
+        let seenSignal: AbortSignal | undefined;
+        mocks.stream.mockImplementation(async function* (_request: CopilotRequest, signal: AbortSignal) {
+            seenSignal = signal;
+            yield { type: "status", stage: "generating", attempt: 1 } as CopilotEvent;
+            await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+        });
+        const { unmount } = renderDrawer();
+        await send("x");
+        await waitFor(() => expect(seenSignal).toBeDefined());
+        unmount();
+        expect(seenSignal?.aborted).toBe(true);
+    });
+
+    it("stopping after the proposal arrived keeps it choosable", async () => {
+        const [status, message, proposal] = proposalEvents();
+        mocks.stream.mockImplementation(async function* (_request: CopilotRequest, signal: AbortSignal) {
+            yield status;
+            yield message;
+            yield proposal;
+            await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+        });
+        renderDrawer();
+        await send("x");
+        await screen.findByTestId("copilot-diff");
+        fireEvent.click(screen.getByLabelText("stop"));
+        expect(await screen.findByText("Apply")).toBeInTheDocument();
+        expect(screen.queryByTestId("copilot-outcome")).toBeNull();
     });
 
     it("closing and reopening the drawer keeps the conversation (AC-21)", async () => {

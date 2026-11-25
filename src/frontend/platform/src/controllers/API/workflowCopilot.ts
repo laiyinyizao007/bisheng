@@ -68,6 +68,8 @@ export interface CopilotProposal {
 export type CopilotEvent =
     | { type: "status"; stage: "generating" | "retrying" | "validating"; attempt: number }
     | { type: "delta"; text: string }
+    /** The proposal's YAML as the model writes it: progress only, checked later. */
+    | { type: "draft"; text: string }
     | { type: "message"; text: string }
     | ({ type: "proposal" } & CopilotProposal)
     | { type: "issues"; issues: string[] }

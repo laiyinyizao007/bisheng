@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-23 用户确认（codex design 审查后修订）；接手时的第一入口 |
 | test-cases.md | ✅ 已生成 | QA 参考，18 条 |
 | tasks.md | ✅ 已拆解 | codex tasks 审查两轮；第二轮唯一的 high（AC-05 无保障）由用户选定「copilot 层走向检查」解决 |
-| 实现 | 🔄 进行中 | 21 / 24 完成。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
+| 实现 | ✅ 已完成 | 24 / 24 完成（fork PR #4）。偏差处理见 design.md 顶部调整原则 + `docs/SDD-Guide.md` §3-§4 |
 
 ---
 
@@ -327,3 +327,4 @@
 - G8 两轮审查后的加固：新模块 `copilot/redact.py`、各项上限与超时、带不过去的节点保留、资源清单缓存 → design.md 修订历史 2026-11-24 第 2、3 条。
 - `base_digest` 不由后端下发，改由前端在发送时自己计算 → design.md 修订历史 2026-11-24 第 2 条。
 - 端到端发现失败原因显示后端英文文案，已改为按错误码本地化（125915fb94）→ test-cases.md TC-CPL-015。
+- 试用反馈：生成过程改为 chat 模式的交互（`draft` 事件、`MessageBubble`、进度折叠框），新文件 `Copilot/CopilotProgress.tsx` → design.md 修订历史 2026-11-24 最后一条。

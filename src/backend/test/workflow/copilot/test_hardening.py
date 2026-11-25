@@ -448,3 +448,103 @@ async def test_a_node_id_that_is_not_a_string_is_fed_back(scripted_llm) -> None:
     assert not of(events, "error")
     (issues,) = of(events, "issues")
     assert any("字符串 id" in text for text in issues["issues"])
+
+
+# ---- the stream splitter: text outside fences vs the draft inside ---------------------------
+
+
+def _split(chunks: list[str]) -> tuple[str, str]:
+    fence = service_module._FenceFilter()
+    text = draft = ""
+    for chunk in [*chunks, None]:
+        pieces = fence.flush() if chunk is None else fence.feed(chunk)
+        for kind, piece in pieces:
+            if kind == "text":
+                text += piece
+            else:
+                draft += piece
+    return text, draft
+
+
+SPLIT_ANSWER = "说明。\n```yaml\nnodes:\n  - id: a\n```\n完。"
+
+
+@pytest.mark.parametrize("size", [1, 2, 3, 5, 7, len(SPLIT_ANSWER)])
+def test_splitter_is_chunking_independent(size: int) -> None:
+    chunks = [SPLIT_ANSWER[i : i + size] for i in range(0, len(SPLIT_ANSWER), size)]
+    assert _split(chunks) == ("说明。\n\n完。", "nodes:\n  - id: a\n")
+
+
+def test_splitter_streams_an_unterminated_block_as_draft() -> None:
+    assert _split(["前言\n```yaml\nnodes: [", "]\n"]) == ("前言\n", "nodes: []\n")
+
+
+def test_splitter_ignores_backticks_in_the_middle_of_a_line() -> None:
+    prose = "用 ```yaml 写声明或者 ``x`` 都行。\n下一行。"
+    assert _split([prose]) == (prose, "")
+
+
+def test_splitter_matches_the_whole_backtick_run() -> None:
+    answer = "前\n````yaml\nnodes: []\n```\nstill: inside\n````\n后"
+    assert _split(list(answer)) == ("前\n\n后", "nodes: []\n```\nstill: inside\n")
+
+
+async def test_the_final_reply_is_what_was_streamed(scripted_llm) -> None:
+    # A non-yaml block is part of the reply (rendered as markdown), never a draft.
+    text = "先说明。\n```json\n{}\n```\n然后 ```yaml 只是提到。\n" + answer(FULL_FLOW, before="", after="完成。")
+    scripted_llm(text)
+    events = await run(prepare())
+    streamed = "".join(e["text"] for e in of(events, "delta"))
+    (message,) = of(events, "message")
+    assert message["text"] == re.sub(r"\n{3,}", "\n\n", streamed).strip()
+    assert "只是提到" in message["text"] and "```json\n{}\n```" in message["text"]
+    assert "".join(e["text"] for e in of(events, "draft")) == FULL_FLOW
+    assert of(events, "proposal")
+
+
+async def test_an_answer_ending_on_the_closing_fence_is_a_proposal(scripted_llm) -> None:
+    scripted_llm(f"说明。\n```yaml\n{FULL_FLOW}```")  # no newline after the fence
+    events = await run(prepare())
+    assert of(events, "proposal"), [e["type"] for e in events]
+    assert "".join(e["text"] for e in of(events, "draft")) == FULL_FLOW
+
+
+async def test_an_unterminated_yaml_block_is_still_checked(scripted_llm) -> None:
+    scripted_llm(f"说明。\n```yaml\n{FULL_FLOW}")
+    events = await run(prepare())
+    assert of(events, "proposal"), [e["type"] for e in events]
+
+
+@pytest.mark.parametrize("size", [1, 2, 3, 4, 7])
+def test_splitter_closes_a_fence_at_the_very_end(size: int) -> None:
+    answer_text = "前\n```yaml\na: 1\n````"
+    chunks = [answer_text[i : i + size] for i in range(0, len(answer_text), size)]
+    fence = service_module._FenceFilter()
+    for chunk in chunks:
+        fence.feed(chunk)
+    fence.flush()
+    assert fence.blocks == [("yaml", "a: 1\n")]
+
+
+@pytest.mark.parametrize("size", [1, 2, 3, 5, 9])
+def test_splitter_accepts_a_fence_indented_up_to_three_spaces(size: int) -> None:
+    answer_text = "方案\n   ```yaml\n   a: 1\n   ```\n    ```yaml\n不是围栏"
+    chunks = [answer_text[i : i + size] for i in range(0, len(answer_text), size)]
+    fence = service_module._FenceFilter()
+    for chunk in chunks:
+        fence.feed(chunk)
+    fence.flush()
+    assert fence.blocks == [("yaml", "   a: 1\n")]  # four spaces: not a fence (CommonMark)
+
+
+@pytest.mark.parametrize("size", [1, 2, 3, 5, 13])
+def test_a_fence_with_an_info_string_never_closes_a_block(size: int) -> None:
+    answer_text = "x\n```text\n```yaml\n```\nafter\n```yaml\nz: 3\n```"
+    chunks = [answer_text[i : i + size] for i in range(0, len(answer_text), size)]
+    fence = service_module._FenceFilter()
+    text = ""
+    for chunk in [*chunks, None]:
+        for kind, piece in fence.flush() if chunk is None else fence.feed(chunk):
+            text += piece if kind == "text" else ""
+    assert fence.blocks == [("yaml", "z: 3\n")]
+    assert "```text\n```yaml\n```" in text  # the text block, verbatim, in the reply

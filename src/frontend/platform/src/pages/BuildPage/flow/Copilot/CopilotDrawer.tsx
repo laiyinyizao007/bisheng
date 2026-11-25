@@ -6,13 +6,15 @@ import {
     type CopilotProposal,
     type CopilotTurn,
 } from "@/controllers/API/workflowCopilot";
-import { ConversationComposer } from "@bisheng/chat";
+import { PlatformChatMarkdown } from "@/components/bs-comp/appChat/PlatformChatMarkdown";
+import { ConversationComposer, MessageBubble, useConversationScroll } from "@bisheng/chat";
 import { Button } from "@bisheng/ui";
 import type { Edge, Node, Viewport } from "@xyflow/react";
 import { Outlined } from "bisheng-icons";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { canvasDigest } from "./canvasDigest";
+import CopilotProgress, { type Attempt, type ProgressEnd } from "./CopilotProgress";
 import DiffPreview, { label } from "./DiffPreview";
 
 /**
@@ -41,8 +43,11 @@ type Outcome = "applied" | "discarded" | "stopped";
 interface Turn {
     id: number;
     role: "user" | "assistant";
+    /** The final reply (``message`` event); while streaming, see {@link shownText}. */
     text: string;
-    status?: string;
+    /** One per model attempt: its streamed explanation and YAML draft. */
+    attempts?: Attempt[];
+    running?: boolean;
     proposal?: CopilotProposal;
     issues?: string[];
     error?: string;
@@ -58,11 +63,26 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
     const { t } = useTranslation("flow");
     const tr = t as unknown as Translate;
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
     const controllerRef = useRef<AbortController | null>(null);
     const nextId = useRef(1);
     const [turns, setTurns] = useState<Turn[]>([]);
     const [busy, setBusy] = useState(false);
     const [availability, setAvailability] = useState<Availability>({ state: "checking" });
+    const [session, setSession] = useState(0);
+
+    // The chat's follow-the-bottom policy: every streamed batch re-renders the list, and
+    // scrolling up to read stops the following until the next message is sent. The hook
+    // resumes following when the newest entry is the user's; the copilot adds its reply in
+    // the same step as the question, so a reply still running counts as the user's.
+    const scrollMessages = useMemo(
+        () => turns.map((turn) => ({ key: `${turn.id}`, kind: turn.role === "user" || turn.running ? "user" : "answer" })),
+        [turns],
+    );
+    useConversationScroll({ scrollRef, sessionKey: `copilot-${session}`, messages: scrollMessages, canLoadOlder: false, onLoadOlder: () => undefined });
+
+    // Leaving the editor ends a turn still streaming: the model call is not left running.
+    useEffect(() => () => controllerRef.current?.abort(), []);
 
     useEffect(() => {
         if (!open || !flowId) return;
@@ -88,36 +108,53 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
         if (inputRef.current) inputRef.current.value = "";
 
         const canvas = getCanvas();
+        // Only final replies: a stopped turn's half-streamed text is not the model's answer.
         const history: CopilotTurn[] = turns.filter((turn) => turn.text).map((turn) => ({ role: turn.role, content: turn.text }));
         const userTurn: Turn = { id: nextId.current++, role: "user", text: message };
-        const reply: Turn = { id: nextId.current++, role: "assistant", text: "", baseDigest: canvasDigest(canvas.nodes, canvas.edges) };
+        const reply: Turn = { id: nextId.current++, role: "assistant", text: "", attempts: [], running: true, baseDigest: canvasDigest(canvas.nodes, canvas.edges) };
         setTurns((all) => [...all, userTurn, reply]);
 
         const controller = new AbortController();
         controllerRef.current = controller;
         setBusy(true);
+        // Events are applied in batches (one render per FLUSH_MS), not one render per chunk:
+        // a long draft arrives in hundreds of pieces.
+        const queued: CopilotEvent[] = [];
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const flush = () => {
+            clearTimeout(timer);
+            timer = undefined;
+            const batch = queued.splice(0);
+            if (batch.length) update(reply.id, (turn) => batch.reduce((acc, event) => ({ ...acc, ...reduceEvent(acc, event, tr) }), turn));
+        };
         try {
             const request = { flow_id: flowId, canvas: { nodes: canvas.nodes, edges: canvas.edges, viewport: canvas.viewport }, history, message };
             for await (const event of streamCopilot(request, controller.signal)) {
-                applyEvent(reply.id, event, update, tr);
+                queued.push(event);
+                timer ??= setTimeout(flush, FLUSH_MS);
             }
+            flush();
         } catch (error) {
+            flush();
             if (controller.signal.aborted) {
-                update(reply.id, { outcome: "stopped", status: undefined });
+                // A proposal that already arrived stays choosable: stop only ends the wait.
+                update(reply.id, (turn) => (turn.proposal ? {} : { outcome: "stopped" }));
             } else {
                 const reason = error instanceof Error && error.message ? error.message : String(error);
-                update(reply.id, { error: reason, status: undefined });
+                update(reply.id, { error: reason });
             }
         } finally {
             controllerRef.current = null;
             setBusy(false);
-            update(reply.id, { status: undefined });
+            update(reply.id, { running: false });
         }
     }, [busy, flowId, getCanvas, tr, turns, update]);
 
     const stop = useCallback(() => {
         controllerRef.current?.abort();
     }, []);
+
+    const discard = useCallback((turn: Turn) => update(turn.id, { outcome: "discarded" }), [update]);
 
     const apply = useCallback(
         (turn: Turn) => {
@@ -159,7 +196,7 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
                     <Outlined.Close size={16} />
                 </Button>
             </div>
-            <div className="flex-1 space-y-3 overflow-y-auto px-4 py-2 text-sm">
+            <div ref={scrollRef} className="flex-1 space-y-1 overflow-y-auto px-2 py-2 text-sm">
                 {availability.state === "checking" && <div className="text-gray-500">{label(tr, "copilot.checking", "Checking…")}</div>}
                 {availability.state === "unavailable" && (
                     <div className="rounded-md bg-red-50 p-2 text-red-700 dark:bg-red-950 dark:text-red-300" data-testid="copilot-unavailable">
@@ -168,7 +205,7 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
                 )}
                 {!turns.length && canExecute && <div className="text-gray-500">{label(tr, "copilot.empty", "")}</div>}
                 {turns.map((turn) => (
-                    <TurnView key={turn.id} turn={turn} busy={busy} t={tr} onApply={() => apply(turn)} onDiscard={() => update(turn.id, { outcome: "discarded" })} />
+                    <TurnView key={turn.id} turn={turn} busy={busy} t={tr} onApply={apply} onDiscard={discard} />
                 ))}
             </div>
             <ConversationComposer
@@ -178,7 +215,10 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
                 showStop={busy}
                 onStop={stop}
                 showRestart={!busy && turns.length > 0}
-                onRestart={() => setTurns([])}
+                onRestart={() => {
+                    setTurns([]);
+                    setSession((value) => value + 1);
+                }}
                 onSend={send}
                 labels={{
                     send: label(tr, "copilot.send", "Send"),
@@ -192,94 +232,138 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
     );
 }
 
-function applyEvent(id: number, event: CopilotEvent, update: (id: number, patch: Partial<Turn> | ((turn: Turn) => Partial<Turn>)) => void, t: Translate) {
+const FLUSH_MS = 50;
+
+/** What one streamed event changes in its reply turn. */
+function reduceEvent(turn: Turn, event: CopilotEvent, t: Translate): Partial<Turn> {
+    const attempts = turn.attempts ?? [];
     switch (event.type) {
         case "status":
-            update(id, {
-                // A retry streams a fresh answer: the rejected attempt's text is not kept.
-                ...(event.stage === "retrying" ? { text: "" } : {}),
-                status:
-                    event.stage === "retrying"
-                        ? label(t, "copilot.statusRetrying", `#${event.attempt}`, { attempt: event.attempt })
-                        : event.stage === "validating"
-                          ? label(t, "copilot.statusValidating", "Validating…")
-                          : label(t, "copilot.statusGenerating", "Generating…"),
-            });
-            break;
+            if (event.stage === "validating") return { attempts: withLast(attempts, { stage: "validating" }) };
+            // Each (re)try streams a fresh answer into its own attempt; the rejected
+            // one's text stays on screen until the new one has something to show.
+            return { attempts: [...attempts, { attempt: event.attempt, stage: "generating", text: "", draft: "" }] };
         case "delta":
-            update(id, (turn) => ({ text: turn.text + event.text }));
-            break;
+            return { attempts: withLast(attempts, (last) => ({ text: last.text + event.text })) };
+        case "draft":
+            return { attempts: withLast(attempts, (last) => ({ draft: last.draft + event.text })) };
         case "message":
-            update(id, { text: event.text });
-            break;
+            return { text: event.text };
         case "proposal":
-            update(id, {
-                proposal: { canvas: event.canvas, diff: event.diff, needs_selection: event.needs_selection, replaced: event.replaced },
-            });
-            break;
+            return { proposal: { canvas: event.canvas, diff: event.diff, needs_selection: event.needs_selection, replaced: event.replaced } };
         case "issues":
-            update(id, { issues: event.issues });
-            break;
+            return { issues: event.issues };
         case "error": {
             // The code's localized copy (AC-27), keeping the exception class the server names.
             const kind = /（([A-Za-z0-9_]+)）$/.exec(event.message)?.[1];
             const text = label(t, `api_errors:${event.code}`, event.message);
-            update(id, { error: kind && text !== event.message ? `${text}（${kind}）` : text });
-            break;
+            return { error: kind && text !== event.message ? `${text}（${kind}）` : text };
         }
         case "done":
-            break;
+            return {};
     }
 }
 
-function TurnView({ turn, busy, t, onApply, onDiscard }: { turn: Turn; busy: boolean; t: Translate; onApply: () => void; onDiscard: () => void }) {
+/** Patch the last attempt (a stray piece before any status starts attempt 1). */
+function withLast(attempts: Attempt[], patch: Partial<Attempt> | ((last: Attempt) => Partial<Attempt>)): Attempt[] {
+    const all = attempts.length ? attempts : [{ attempt: 1, stage: "generating" as const, text: "", draft: "" }];
+    const last = all[all.length - 1];
+    return [...all.slice(0, -1), { ...last, ...(typeof patch === "function" ? patch(last) : patch) }];
+}
+
+/** The reply once it is final; while streaming, the newest attempt that has said something. */
+function shownText(turn: Turn): string {
+    if (turn.text || turn.role === "user") return turn.text;
+    return [...(turn.attempts ?? [])].reverse().find((attempt) => attempt.text)?.text ?? "";
+}
+
+function progressEnd(turn: Turn): ProgressEnd {
+    if (turn.running) return "running";
+    if (turn.outcome === "stopped") return "stopped";
+    if (turn.outcome === "discarded") return "discarded";
+    if (turn.proposal) return "done";
+    if (turn.error) return "error";
+    return "failed";
+}
+
+const USER_AVATAR = typeof __APP_ENV__ !== "undefined" ? `${__APP_ENV__.BASE_URL}/assets/user.png` : "";
+
+interface TurnViewProps {
+    turn: Turn;
+    busy: boolean;
+    t: Translate;
+    onApply: (turn: Turn) => void;
+    onDiscard: (turn: Turn) => void;
+}
+
+/** Memoized: while a reply streams, only that turn re-renders, not the earlier diffs. */
+const TurnView = memo(function TurnView({ turn, busy, t, onApply, onDiscard }: TurnViewProps) {
     if (turn.role === "user") {
         return (
-            <div className="ml-8 whitespace-pre-wrap rounded-lg bg-gray-100 p-2 dark:bg-gray-800" data-testid="copilot-user">
-                {turn.text}
+            <div data-testid="copilot-user">
+                <MessageBubble logo={USER_AVATAR ? <img className="h-6 w-6 min-w-6" src={USER_AVATAR} alt="" /> : undefined}>
+                    <div className="whitespace-break-spaces break-all text-sm text-[#0D1638] dark:text-[#CFD5E8]">{turn.text}</div>
+                </MessageBubble>
             </div>
         );
     }
-    const pending = turn.proposal && !turn.outcome;
+    const text = shownText(turn);
+    const choosing = turn.proposal && !turn.outcome;
+    const progress = turn.attempts?.length ? <CopilotProgress attempts={turn.attempts} end={progressEnd(turn)} t={t} /> : undefined;
+    const stopped = turn.outcome === "stopped";
+    const hasBody = !!(text || turn.issues || turn.error || turn.proposal || (turn.outcome && !stopped));
     return (
-        <div className="mr-4" data-testid="copilot-assistant">
-            {turn.text && <div className="whitespace-pre-wrap">{turn.text}</div>}
-            {turn.status && <div className="text-gray-500">{turn.status}</div>}
-            {turn.issues && (
-                <div className="mt-2 rounded-md bg-red-50 p-2 text-red-700 dark:bg-red-950 dark:text-red-300" data-testid="copilot-issues">
-                    <div>{label(t, "copilot.issuesTitle", "The proposal did not pass validation:")}</div>
-                    <ul className="ml-4 list-disc">
-                        {turn.issues.map((issue, index) => (
-                            <li key={index}>{issue}</li>
-                        ))}
-                    </ul>
-                </div>
-            )}
-            {turn.error && (
-                <div className="mt-2 text-red-600" data-testid="copilot-error">
-                    {label(t, "copilot.failed", turn.error, { message: turn.error })}
-                </div>
-            )}
-            {turn.proposal && <DiffPreview proposal={turn.proposal} />}
-            {pending && (
-                <div className="mt-2 flex gap-2">
-                    <Button size="medium" variant="solid" disabled={busy} onClick={onApply}>
-                        {label(t, "copilot.apply", "Apply")}
-                    </Button>
-                    <Button size="medium" variant="outlined" color="default" onClick={onDiscard}>
-                        {label(t, "copilot.discard", "Discard")}
-                    </Button>
-                </div>
-            )}
-            {turn.outcome && (
-                <div className="mt-1 text-gray-500" data-testid="copilot-outcome">
-                    {turn.outcome === "applied"
-                        ? label(t, "copilot.applied", "Applied")
-                        : turn.outcome === "discarded"
-                          ? label(t, "copilot.discarded", "Discarded")
-                          : label(t, "copilot.stopped", "Stopped")}
-                </div>
-            )}
+        <div data-testid="copilot-assistant">
+            <MessageBubble
+                reasoning={progress}
+                hideBody={!!progress && !hasBody}
+                // The chat's spinner: only until the first status starts the progress box.
+                pending={!!turn.running && !progress && !hasBody}
+                status={
+                    stopped ? (
+                        <p role="status" className="ml-4 mt-2 text-body-sm text-text-3" data-testid="copilot-outcome">
+                            {label(t, "copilot.stopped", "Stopped")}
+                        </p>
+                    ) : undefined
+                }
+            >
+                {text && (
+                    <div className="bs-mkdown break-words text-sm [word-break:break-all]">
+                        <PlatformChatMarkdown content={text} />
+                    </div>
+                )}
+                {turn.issues && (
+                    <div className="mt-2 rounded-md bg-red-50 p-2 text-red-700 dark:bg-red-950 dark:text-red-300" data-testid="copilot-issues">
+                        <div>{label(t, "copilot.issuesTitle", "The proposal did not pass validation:")}</div>
+                        <ul className="ml-4 list-disc">
+                            {turn.issues.map((issue, index) => (
+                                <li key={index}>{issue}</li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+                {turn.error && (
+                    <div className="mt-2 text-red-600" data-testid="copilot-error">
+                        {label(t, "copilot.failed", turn.error, { message: turn.error })}
+                    </div>
+                )}
+                {turn.proposal && <DiffPreview proposal={turn.proposal} />}
+                {choosing && (
+                    <div className="mt-2 flex gap-2">
+                        <Button size="medium" variant="solid" disabled={busy} onClick={() => onApply(turn)}>
+                            {label(t, "copilot.apply", "Apply")}
+                        </Button>
+                        <Button size="medium" variant="outlined" color="default" onClick={() => onDiscard(turn)}>
+                            {label(t, "copilot.discard", "Discard")}
+                        </Button>
+                    </div>
+                )}
+                {turn.outcome && !stopped && (
+                    <div className="mt-1 text-gray-500" data-testid="copilot-outcome">
+                        {turn.outcome === "applied" ? label(t, "copilot.applied", "Applied") : label(t, "copilot.discarded", "Discarded")}
+                    </div>
+                )}
+            </MessageBubble>
         </div>
     );
-}
+});

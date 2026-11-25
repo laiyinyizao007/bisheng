@@ -116,6 +116,26 @@ async def test_streamed_text_never_contains_the_yaml(scripted_llm) -> None:
     assert "start_1" not in streamed and "```" not in streamed
 
 
+async def test_the_yaml_streams_as_draft_without_its_fences(scripted_llm) -> None:
+    scripted_llm(answer(FULL_FLOW, before="先说明。", after="完成。"))
+    events = await run(prepare())
+    draft = "".join(e["text"] for e in of(events, "draft"))
+    assert draft == FULL_FLOW  # the block's body only: no fence, no ``yaml`` info line
+    assert "先说明。" not in draft and "完成。" not in draft
+    # Each attempt's draft starts after its own status event.
+    kinds = [e["type"] for e in events]
+    assert kinds.index("status") < kinds.index("draft")
+
+
+async def test_each_retry_streams_its_own_draft(scripted_llm) -> None:
+    broken = FULL_FLOW.replace("user_prompt:", "no_such_param: x\n      user_prompt:")
+    scripted_llm(answer(broken), answer(FULL_FLOW))
+    events = await run(prepare())
+    retry = next(i for i, e in enumerate(events) if e["type"] == "status" and e["stage"] == "retrying")
+    assert "".join(e["text"] for e in of(events[:retry], "draft")) == broken
+    assert "".join(e["text"] for e in of(events[retry:], "draft")) == FULL_FLOW
+
+
 async def test_a_plain_answer_is_text_only(scripted_llm) -> None:
     scripted_llm("正则是部分匹配（re.search）。")
     events = await run(prepare(message="条件节点的正则是全匹配吗"))

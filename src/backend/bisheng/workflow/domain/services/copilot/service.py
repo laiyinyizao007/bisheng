@@ -8,6 +8,8 @@ events:
 =============  =====================================================================
 ``status``     ``stage``: ``generating`` / ``retrying`` / ``validating``, ``attempt``
 ``delta``      model text outside the ```yaml block, as it streams
+``draft``      the block's body as it streams (fences and info line dropped) — progress
+               only: what the model wrote from the masked canvas, before any check
 ``message``    the whole text reply (no YAML) — what the drawer keeps as history
 ``proposal``   ``canvas`` (merged), ``diff`` (of the merged canvas), ``needs_selection``,
                ``replaced``
@@ -65,8 +67,6 @@ from bisheng_flow_dsl.dump import dump
 from bisheng_flow_dsl.errors import DslError
 from bisheng_flow_dsl.validate import validate
 
-_YAML_BLOCK = re.compile(r"```ya?ml[^\n]*\n(.*?)```", re.DOTALL | re.IGNORECASE)
-_ANY_YAML_BLOCK = re.compile(r"```ya?ml\b.*?(```|\Z)", re.DOTALL | re.IGNORECASE)
 _UNRESOLVED_TYPE = "__copilot_unresolved__"
 _CODE_TYPE = "code"
 _END_TYPE = "end"
@@ -167,7 +167,7 @@ class WorkflowCopilotService:
                 attempts = attempt
                 yield {"type": "status", "stage": "generating" if attempt == 1 else "retrying", "attempt": attempt}
                 fence = _FenceFilter()
-                answer = ""
+                answer = shown = ""
                 too_long = False
                 # The deadline guards only the awaits on the model, never a ``yield``: a
                 # timeout scope left open across a yield would fire in the consumer's frame.
@@ -186,12 +186,12 @@ class WorkflowCopilotService:
                         if len(answer) > MAX_ANSWER_CHARS:
                             too_long = True
                             break
-                        visible = fence.feed(text)
-                        if visible:
-                            yield {"type": "delta", "text": visible}
-                    tail = fence.flush()
-                    if tail:
-                        yield {"type": "delta", "text": tail}
+                        for kind, piece in fence.feed(text):
+                            shown += piece if kind == "text" else ""
+                            yield {"type": _STREAM_EVENT[kind], "text": piece}
+                    for kind, piece in fence.flush():
+                        shown += piece if kind == "text" else ""
+                        yield {"type": _STREAM_EVENT[kind], "text": piece}
                 except asyncio.CancelledError:
                     outcome = "cancelled"
                     raise
@@ -220,8 +220,9 @@ class WorkflowCopilotService:
                     }
                     return
 
-                reply = _text_only(answer)
-                block = _yaml_block(answer)
+                # The reply and the block come from the same split the stream showed.
+                reply = _tidy(shown)
+                block = fence.yaml_block()
                 if block is None and attempt == 1:
                     outcome = "text"
                     yield {"type": "message", "text": reply}
@@ -471,50 +472,142 @@ def _reachability(definition: dict[str, Any], sent: dict[str, Any]) -> list[str]
 # ---- text handling ---------------------------------------------------------------------------
 
 
-def _yaml_block(answer: str) -> str | None:
-    found = _YAML_BLOCK.search(answer)
-    return found.group(1) if found else None
+_STREAM_EVENT = {"text": "delta", "draft": "draft"}
+_BACKTICKS = re.compile(r"`{3,}")
+# What could still turn into a fence once the next chunk comes: indentation and backticks.
+_TRAILING_TICKS = re.compile(r" {0,3}`{0,2}\Z")
 
 
-def _text_only(answer: str) -> str:
-    return re.sub(r"\n{3,}", "\n\n", _ANY_YAML_BLOCK.sub("", answer)).strip()
+def _tidy(text: str) -> str:
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 class _FenceFilter:
-    """Streams the text outside ```yaml blocks; holds back a tail that might start a fence."""
+    """Splits the streamed answer into ``("text", …)`` outside fences and ``("draft", …)`` inside.
 
-    _OPEN = "```"
+    One rule for the stream, the reply and the block that is validated (G8 on the
+    ``draft`` change): a fence is a run of three or more backticks at the start of a line,
+    indented by at most three spaces (CommonMark; models fence inside list items), closed by
+    a run at least as long, placed the same way; backticks mid-line are text. A yaml block's
+    fences and info line (```yaml) go to neither side and its body is the draft; any other
+    block stays in the reply verbatim. Each block is kept in ``blocks`` with its info string.
+    Indentation and backticks at the end of a chunk that might still become a fence are held
+    back until the next chunk decides them, so the split does not depend on where the
+    model's chunks happen to break.
+    """
 
     def __init__(self) -> None:
         self._buffer = ""
-        self._inside = False
+        # "text" | "info" (the opening fence's line) | "draft" (a yaml block) | "code" (any other)
+        self._state = "text"
+        self._line_start = True  # whether the buffer starts at the start of a line
+        self._open = 0  # the opening run's length while inside a block
+        self._fence = ""  # the opening run itself, re-emitted for a non-yaml block
+        self._info = ""
+        self._body = ""
+        self.blocks: list[tuple[str, str]] = []
 
-    def feed(self, text: str) -> str:
-        self._buffer += text
-        shown = ""
-        while True:
-            if self._inside:
-                end = self._buffer.find(self._OPEN)
-                if end < 0:
-                    self._buffer = self._buffer[-(len(self._OPEN) - 1) :]
-                    return shown
-                self._buffer = self._buffer[end + len(self._OPEN) :]
-                self._inside = False
+    def yaml_block(self) -> str | None:
+        """The first closed block tagged yaml / yml, as the model wrote it."""
+        return next((body for info, body in self.blocks if info.split()[:1] in (["yaml"], ["yml"])), None)
+
+    def _indent_start(self, index: int) -> int | None:
+        """Where the line holding ``index`` starts, if at most three spaces precede it there."""
+        start = index
+        while start > 0 and index - start < 3 and self._buffer[start - 1] == " ":
+            start -= 1
+        at_line_start = self._line_start if start == 0 else self._buffer[start - 1] == "\n"
+        return start if at_line_start else None
+
+    def _emit(self, pieces: list[tuple[str, str]], text: str) -> None:
+        if not text:
+            return
+        # Only a yaml block is a draft; any other block stays in the reply, fences and all.
+        pieces.append(("draft" if self._state == "draft" else "text", text))
+        if self._state == "draft":
+            self._body += text
+        self._line_start = text.endswith("\n")
+
+    def _next_fence(self) -> tuple[re.Match[str] | None, int]:
+        """The next fence and where its indentation starts, or None and how much is safe to emit."""
+        for run in _BACKTICKS.finditer(self._buffer):
+            start = self._indent_start(run.start())
+            if start is None:
                 continue
-            start = self._buffer.find(self._OPEN)
-            if start < 0:
-                keep = len(self._OPEN) - 1
-                shown += self._buffer[:-keep] if len(self._buffer) > keep else ""
-                self._buffer = self._buffer[-keep:] if len(self._buffer) > keep else self._buffer
-                return shown
-            shown += self._buffer[:start]
-            self._buffer = self._buffer[start + len(self._OPEN) :]
-            self._inside = True
+            if run.end() == len(self._buffer):  # the run may still grow
+                return None, start
+            if self._state == "text":
+                return run, start
+            # A closing fence is long enough and has nothing after it on its line: ```yaml
+            # inside a block is content, never the block's end (CommonMark).
+            if len(run.group()) < self._open:
+                continue
+            eol = self._buffer.find("\n", run.end())
+            if self._buffer[run.end() : eol if eol >= 0 else None].strip(" \t\r"):
+                continue
+            if eol < 0:  # the line may still turn out to carry text after the run
+                return None, start
+            return run, start
+        tail = _TRAILING_TICKS.search(self._buffer)
+        if tail and tail.group() and self._indent_start(tail.start()) == tail.start():
+            return None, tail.start()
+        return None, len(self._buffer)
 
-    def flush(self) -> str:
-        """The held-back tail once the stream has ended (nothing, if it ended inside a block)."""
-        tail, self._buffer = ("" if self._inside else self._buffer), ""
-        return tail
+    def _open_block(self, pieces: list[tuple[str, str]], line: str) -> None:
+        self._info = line.strip().lower()
+        if self._info.split()[:1] in (["yaml"], ["yml"]):
+            self._state, self._line_start, self._body = "draft", True, ""
+        else:
+            self._state = "code"
+            self._emit(pieces, self._fence + line)
+
+    def _close_block(self, pieces: list[tuple[str, str]], run: str) -> None:
+        if self._state == "draft":
+            self.blocks.append((self._info, self._body))
+        else:
+            self._emit(pieces, run)
+        self._state, self._line_start = "text", False
+
+    def feed(self, text: str) -> list[tuple[str, str]]:
+        self._buffer += text
+        pieces: list[tuple[str, str]] = []
+        while True:
+            if self._state == "info":
+                end = self._buffer.find("\n")
+                if end < 0:
+                    return pieces
+                line, self._buffer = self._buffer[: end + 1], self._buffer[end + 1 :]
+                self._open_block(pieces, line)
+                continue
+            fence, safe = self._next_fence()
+            self._emit(pieces, self._buffer[:safe])
+            if fence is None:
+                self._buffer = self._buffer[safe:]
+                return pieces
+            raw, self._buffer = self._buffer[safe : fence.end()], self._buffer[fence.end() :]
+            if self._state == "text":
+                self._state, self._open, self._fence = "info", len(fence.group()), raw
+            else:
+                self._close_block(pieces, raw)
+
+    def flush(self) -> list[tuple[str, str]]:
+        """What was held back once the stream has ended.
+
+        A held run that closes the open block closes it (answers often end right on the
+        fence); a yaml block the stream cut off is still kept for checking, as before the
+        split was shared. An unfinished opening fence line is dropped.
+        """
+        pieces: list[tuple[str, str]] = []
+        tail, self._buffer = self._buffer, ""
+        inside = self._state in ("draft", "code")
+        closing = re.fullmatch(r" {0,3}(`+)[ \t]*", tail) if inside and self._line_start else None
+        if closing and len(closing.group(1)) >= self._open:
+            self._close_block(pieces, tail)
+        elif self._state != "info":
+            self._emit(pieces, tail)
+            if self._state == "draft":
+                self.blocks.append((self._info, self._body))
+        return pieces
 
 
 def _as_langchain(messages: list[dict[str, str]]) -> list[Any]:
