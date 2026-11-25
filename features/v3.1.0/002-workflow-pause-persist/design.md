@@ -104,8 +104,9 @@ sequenceDiagram
 
 ### 4.2 关键数据结构
 
-- 快照键：`workflow_pause:{tenant_id}:{unique_id}`，值为带格式版本号的 JSON，字节字段用 Base64。
-- 续跑令牌键：`workflow_resume_lock:{tenant_id}:{unique_id}`。
+- 快照键：`workflow:{unique_id}:pause`，保留期内存活；值为带格式版本号的 JSON，租户号与工作流号写在值里，读取时校验。
+- 标记键：`workflow:{unique_id}:pause_meta`，只含暂停时间与到期时间，比快照多存活一天，使保留期后一天内的请求得到“已过期”而不是“找不到”。
+- 续跑令牌键：`workflow:{unique_id}:pause_lock`，短期存活，一次只有一个输入能抢到。
 - 配置：`workflow.pause_retention_seconds`（新增，默认 604800）。
 
 ### 4.3 模块职责
@@ -162,4 +163,5 @@ sequenceDiagram
 | 日期 | 变更 |
 |---|---|
 | 2026-11-25 | 初稿，待用户确认 |
+| 2026-11-25 | 实现偏差（细节级，不改决策）：键名沿用现有 `workflow:{unique_id}:…` 形式，租户号写在值里校验；新增标记键，过期提示窗口为保留期后一天，之后同一会话号等同于未知会话（与现状一致）。 |
 | 2026-11-25 | 实现偏差（细节级，不改决策）：检查点改为通过公共接口只导出最新一份，不读 `MemorySaver` 内部存储；新增模块 `workflow/graph/run_state.py`，引擎增加 `export_run_state`、`import_run_state`（见 tasks T002） |
