@@ -171,3 +171,23 @@ def test_capabilities_name_the_notification_tools_the_user_can_use() -> None:
 def test_capabilities_come_before_the_skill_document() -> None:
     system = build()[0]["content"]
     assert system.index(prompt.CAPABILITIES_HEADING) < system.index("# 工作流声明技能文档")
+
+
+# ---- F008 T006: ask first, state assumptions (design §3) ------------------------------------
+
+
+def test_preface_has_the_requirement_check_before_the_answer_format() -> None:
+    text = prompt.PREFACE
+    check = text.index("# 需求检查")
+    assert check < text.index("# 回答格式")
+    section = text[check : text.index("# 回答格式")]
+    for point in ("币种", "边界", "异常", "循环", "副作用", "关键点", "次要点", "2 轮"):
+        assert point in section, point
+
+
+def test_answer_format_defines_the_ask_block_and_the_proposal_notes() -> None:
+    text = prompt.PREFACE
+    fmt = text[text.index("# 回答格式") : text.index("# 修改已有工作流")]
+    for must in ("```ask", "question:", "options:", "最多 3", "2–4", "不要输出 yaml", "假设：", "做不到 / 替代："):
+        assert must in fmt, must
+    assert "需求不清楚就追问" not in fmt  # replaced by the explicit check above
