@@ -14,7 +14,8 @@ export type AskState = "open" | "answered" | "skipped";
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-const OTHER = "\u0000other";
+/** What a question's pick holds: an option's index, or "other". */
+type Pick = number | "other";
 
 interface Props {
     questions: CopilotQuestion[];
@@ -31,7 +32,7 @@ export function answersMessage(questions: CopilotQuestion[], answers: Record<str
 }
 
 export default function AskCard({ questions, state, answers, busy, t, onSubmit }: Props) {
-    const [picked, setPicked] = useState<Record<string, string>>({});
+    const [picked, setPicked] = useState<Record<string, Pick>>({});
     const [other, setOther] = useState<Record<string, string>>({});
 
     if (state !== "open") {
@@ -51,12 +52,12 @@ export default function AskCard({ questions, state, answers, busy, t, onSubmit }
     const resolved: Record<string, string> = {};
     for (const q of questions) {
         const choice = picked[q.id];
-        const text = choice === OTHER ? (other[q.id] ?? "").trim() : choice;
+        const text = choice === "other" ? (other[q.id] ?? "").trim() : choice === undefined ? "" : q.options[choice];
         if (text) resolved[q.id] = text;
     }
     const complete = questions.every((q) => resolved[q.id]);
 
-    const option = (q: CopilotQuestion, value: string, text: string) => {
+    const option = (q: CopilotQuestion, value: Pick, text: string) => {
         const active = picked[q.id] === value;
         return (
             <button
@@ -78,10 +79,10 @@ export default function AskCard({ questions, state, answers, busy, t, onSubmit }
                 <div key={q.id}>
                     <div className="mb-1 font-medium">{q.question}</div>
                     <div className="flex flex-wrap gap-2">
-                        {q.options.map((text) => option(q, text, text))}
-                        {option(q, OTHER, label(t, "copilot.askOther", "Other"))}
+                        {q.options.map((text, index) => option(q, index, text))}
+                        {option(q, "other", label(t, "copilot.askOther", "Other"))}
                     </div>
-                    {picked[q.id] === OTHER && (
+                    {picked[q.id] === "other" && (
                         <input
                             className="mt-2 w-full rounded-md border px-2 py-1 text-xs"
                             value={other[q.id] ?? ""}

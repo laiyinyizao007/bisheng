@@ -69,6 +69,7 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const controllerRef = useRef<AbortController | null>(null);
+    const inFlight = useRef(false);
     const nextId = useRef(1);
     const [turns, setTurns] = useState<Turn[]>([]);
     const [busy, setBusy] = useState(false);
@@ -111,7 +112,8 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
      * answered; any other card still open is locked as not answered.
      */
     const submit = useCallback(async (message: string, answered?: { turnId: number; answers: Record<string, string> }) => {
-        if (!message || busy) return;
+        if (!message || busy || inFlight.current) return;
+        inFlight.current = true;
 
         const canvas = getCanvas();
         // Only final replies (a stopped turn's half-streamed text is not the model's answer),
@@ -122,16 +124,13 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
         const userTurn: Turn = { id: nextId.current++, role: "user", text: message };
         const reply: Turn = { id: nextId.current++, role: "assistant", text: "", attempts: [], running: true, baseDigest: canvasDigest(canvas.nodes, canvas.edges) };
         setTurns((all) => [
-            ...all.map((turn) =>
-                turn.ask?.state === "open"
-                    ? {
-                          ...turn,
-                          ask: turn.id === answered?.turnId
-                              ? { ...turn.ask, state: "answered" as const, answers: answered.answers }
-                              : { ...turn.ask, state: "skipped" as const },
-                      }
-                    : turn,
-            ),
+            ...all.map((turn) => {
+                if (turn.ask?.state !== "open") return turn;
+                if (answered) {
+                    return turn.id === answered.turnId ? { ...turn, ask: { ...turn.ask, state: "answered" as const, answers: answered.answers } } : turn;
+                }
+                return { ...turn, ask: { ...turn.ask, state: "skipped" as const } };
+            }),
             userTurn,
             reply,
         ]);
@@ -167,6 +166,7 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
             }
         } finally {
             controllerRef.current = null;
+            inFlight.current = false;
             setBusy(false);
             update(reply.id, { running: false });
         }
@@ -179,13 +179,13 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
         void submit(message);
     }, [busy, submit]);
 
-    const answer = useCallback(
-        (turn: Turn, answers: Record<string, string>) => {
-            if (!turn.ask) return;
-            void submit(answersMessage(turn.ask.questions, answers), { turnId: turn.id, answers });
-        },
-        [submit],
-    );
+    const submitRef = useRef(submit);
+    submitRef.current = submit;
+    // Stable across renders (submit is not: it closes over the turns), so TurnView's memo holds.
+    const answer = useCallback((turn: Turn, answers: Record<string, string>) => {
+        if (!turn.ask) return;
+        void submitRef.current(answersMessage(turn.ask.questions, answers), { turnId: turn.id, answers });
+    }, []);
 
     const stop = useCallback(() => {
         controllerRef.current?.abort();
@@ -399,6 +399,7 @@ const TurnView = memo(function TurnView({ turn, busy, t, onApply, onDiscard, onA
                 )}
                 {turn.ask && (
                     <AskCard
+                        key={turn.ask.questions.map((q) => `${q.id}:${q.question}`).join("|")}
                         questions={turn.ask.questions}
                         state={turn.ask.state}
                         answers={turn.ask.answers}

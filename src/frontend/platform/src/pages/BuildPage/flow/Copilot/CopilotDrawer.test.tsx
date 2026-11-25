@@ -498,6 +498,21 @@ describe("ask first (F008)", () => {
         expect(request.message).toContain("Foreign currency?：EUR at 7.8");
     });
 
+    it("a double click on continue sends once", async () => {
+        mocks.stream.mockImplementationOnce(streamOf(askEvents())).mockImplementation(streamOf(proposalEvents()));
+        renderDrawer();
+        await send("x");
+        const card = await screen.findByTestId("copilot-ask");
+        fireEvent.click(within(card).getByRole("button", { name: "Convert" }));
+        fireEvent.click(within(card).getByRole("button", { name: "Email the lead" }));
+        const proceed = within(card).getByRole("button", { name: "Continue with these" });
+        await act(async () => {
+            fireEvent.click(proceed);
+            fireEvent.click(proceed);
+        });
+        expect(mocks.stream).toHaveBeenCalledTimes(2); // the first request and one answer
+    });
+
     it("typing a new message instead locks the card as not answered", async () => {
         mocks.stream.mockImplementationOnce(streamOf(askEvents())).mockImplementation(streamOf(proposalEvents()));
         renderDrawer();
