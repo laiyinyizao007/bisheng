@@ -4,6 +4,7 @@ import {
     streamCopilot,
     type CopilotEvent,
     type CopilotProposal,
+    type CopilotQuestion,
     type CopilotTurn,
 } from "@/controllers/API/workflowCopilot";
 import { PlatformChatMarkdown } from "@/components/bs-comp/appChat/PlatformChatMarkdown";
@@ -14,6 +15,7 @@ import { Outlined } from "bisheng-icons";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { canvasDigest } from "./canvasDigest";
+import AskCard, { answersMessage, type AskState } from "./AskCard";
 import CopilotProgress, { type Attempt, type ProgressEnd } from "./CopilotProgress";
 import DiffPreview, { label } from "./DiffPreview";
 
@@ -49,6 +51,8 @@ interface Turn {
     attempts?: Attempt[];
     running?: boolean;
     proposal?: CopilotProposal;
+    /** F008: questions asked before proposing, and what became of the card. */
+    ask?: { questions: CopilotQuestion[]; state: AskState; answers?: Record<string, string> };
     issues?: string[];
     error?: string;
     outcome?: Outcome;
@@ -102,17 +106,35 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
         setTurns((all) => all.map((turn) => (turn.id === id ? { ...turn, ...(typeof patch === "function" ? patch(turn) : patch) } : turn)));
     }, []);
 
-    const send = useCallback(async () => {
-        const message = inputRef.current?.value.trim() ?? "";
+    /**
+     * Send one user turn. ``answered``: the card this message answers (F008) — it is locked as
+     * answered; any other card still open is locked as not answered.
+     */
+    const submit = useCallback(async (message: string, answered?: { turnId: number; answers: Record<string, string> }) => {
         if (!message || busy) return;
-        if (inputRef.current) inputRef.current.value = "";
 
         const canvas = getCanvas();
-        // Only final replies: a stopped turn's half-streamed text is not the model's answer.
-        const history: CopilotTurn[] = turns.filter((turn) => turn.text).map((turn) => ({ role: turn.role, content: turn.text }));
+        // Only final replies (a stopped turn's half-streamed text is not the model's answer),
+        // plus the questions a turn asked, so a turn that only asked is not lost (F008).
+        const history: CopilotTurn[] = turns
+            .map((turn) => ({ role: turn.role, content: historyText(turn) }))
+            .filter((turn) => turn.content);
         const userTurn: Turn = { id: nextId.current++, role: "user", text: message };
         const reply: Turn = { id: nextId.current++, role: "assistant", text: "", attempts: [], running: true, baseDigest: canvasDigest(canvas.nodes, canvas.edges) };
-        setTurns((all) => [...all, userTurn, reply]);
+        setTurns((all) => [
+            ...all.map((turn) =>
+                turn.ask?.state === "open"
+                    ? {
+                          ...turn,
+                          ask: turn.id === answered?.turnId
+                              ? { ...turn.ask, state: "answered" as const, answers: answered.answers }
+                              : { ...turn.ask, state: "skipped" as const },
+                      }
+                    : turn,
+            ),
+            userTurn,
+            reply,
+        ]);
 
         const controller = new AbortController();
         controllerRef.current = controller;
@@ -149,6 +171,21 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
             update(reply.id, { running: false });
         }
     }, [busy, flowId, getCanvas, tr, turns, update]);
+
+    const send = useCallback(() => {
+        const message = inputRef.current?.value.trim() ?? "";
+        if (!message || busy) return;
+        if (inputRef.current) inputRef.current.value = "";
+        void submit(message);
+    }, [busy, submit]);
+
+    const answer = useCallback(
+        (turn: Turn, answers: Record<string, string>) => {
+            if (!turn.ask) return;
+            void submit(answersMessage(turn.ask.questions, answers), { turnId: turn.id, answers });
+        },
+        [submit],
+    );
 
     const stop = useCallback(() => {
         controllerRef.current?.abort();
@@ -205,7 +242,7 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
                 )}
                 {!turns.length && canExecute && <div className="text-gray-500">{label(tr, "copilot.empty", "")}</div>}
                 {turns.map((turn) => (
-                    <TurnView key={turn.id} turn={turn} busy={busy} t={tr} onApply={apply} onDiscard={discard} />
+                    <TurnView key={turn.id} turn={turn} busy={busy} t={tr} onApply={apply} onDiscard={discard} onAnswer={answer} />
                 ))}
             </div>
             <ConversationComposer
@@ -255,6 +292,8 @@ function reduceEvent(turn: Turn, event: CopilotEvent, t: Translate): Partial<Tur
             return { proposal: { canvas: event.canvas, diff: event.diff, needs_selection: event.needs_selection, replaced: event.replaced } };
         case "issues":
             return { issues: event.issues };
+        case "ask":
+            return { ask: { questions: event.questions, state: "open" } };
         case "error": {
             // The code's localized copy (AC-27), keeping the exception class the server names.
             const kind = /（([A-Za-z0-9_]+)）$/.exec(event.message)?.[1];
@@ -271,6 +310,13 @@ function withLast(attempts: Attempt[], patch: Partial<Attempt> | ((last: Attempt
     const all = attempts.length ? attempts : [{ attempt: 1, stage: "generating" as const, text: "", reasoning: "", draft: "" }];
     const last = all[all.length - 1];
     return [...all.slice(0, -1), { ...last, ...(typeof patch === "function" ? patch(last) : patch) }];
+}
+
+/** What a turn contributes to the next request's history (F008 design §5). */
+function historyText(turn: Turn): string {
+    if (turn.role === "user") return turn.text;
+    const asked = (turn.ask?.questions ?? []).map((q) => `Q: ${q.question} (options: ${q.options.join(" / ")})`);
+    return [turn.text, ...asked].join("\n").trim();
 }
 
 /** The reply once it is final; while streaming, the newest attempt that has said something. */
@@ -297,10 +343,11 @@ interface TurnViewProps {
     t: Translate;
     onApply: (turn: Turn) => void;
     onDiscard: (turn: Turn) => void;
+    onAnswer: (turn: Turn, answers: Record<string, string>) => void;
 }
 
 /** Memoized: while a reply streams, only that turn re-renders, not the earlier diffs. */
-const TurnView = memo(function TurnView({ turn, busy, t, onApply, onDiscard }: TurnViewProps) {
+const TurnView = memo(function TurnView({ turn, busy, t, onApply, onDiscard, onAnswer }: TurnViewProps) {
     if (turn.role === "user") {
         return (
             <div data-testid="copilot-user">
@@ -314,7 +361,7 @@ const TurnView = memo(function TurnView({ turn, busy, t, onApply, onDiscard }: T
     const choosing = turn.proposal && !turn.outcome;
     const progress = turn.attempts?.length ? <CopilotProgress attempts={turn.attempts} end={progressEnd(turn)} t={t} /> : undefined;
     const stopped = turn.outcome === "stopped";
-    const hasBody = !!(text || turn.issues || turn.error || turn.proposal || (turn.outcome && !stopped));
+    const hasBody = !!(text || turn.issues || turn.error || turn.proposal || turn.ask || (turn.outcome && !stopped));
     return (
         <div data-testid="copilot-assistant">
             <MessageBubble
@@ -349,6 +396,16 @@ const TurnView = memo(function TurnView({ turn, busy, t, onApply, onDiscard }: T
                     <div className="mt-2 text-red-600" data-testid="copilot-error">
                         {label(t, "copilot.failed", turn.error, { message: turn.error })}
                     </div>
+                )}
+                {turn.ask && (
+                    <AskCard
+                        questions={turn.ask.questions}
+                        state={turn.ask.state}
+                        answers={turn.ask.answers}
+                        busy={busy}
+                        t={t}
+                        onSubmit={(answers) => onAnswer(turn, answers)}
+                    />
                 )}
                 {turn.proposal && <DiffPreview proposal={turn.proposal} />}
                 {choosing && (
