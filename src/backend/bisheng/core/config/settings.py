@@ -298,6 +298,9 @@ class ObjectStore(BaseModel):
     minio: MinioConf | None = Field(default_factory=MinioConf, description="minio Configure")
 
 
+DEFAULT_PAUSE_RETENTION_SECONDS = 7 * 24 * 3600
+
+
 class WorkflowConf(BaseModel):
     """Workflow Configuration"""
 
@@ -316,6 +319,23 @@ class WorkflowConf(BaseModel):
             "and a run uses only a configured external container or e2b interpreter."
         ),
     )
+
+    pause_retention_seconds: int = Field(
+        default=DEFAULT_PAUSE_RETENTION_SECONDS,
+        description=(
+            "How long a workflow that is waiting for user input keeps its resumable state (seconds). "
+            "After this the session is reported as expired. Default 7 days."
+        ),
+    )
+
+    @field_validator("pause_retention_seconds", mode="before")
+    @classmethod
+    def validate_pause_retention_seconds(cls, value: object) -> int:
+        # Anything that is not a positive integer falls back to the default: a typo must
+        # not turn into "keep forever" or "expire at once".
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            return DEFAULT_PAUSE_RETENTION_SECONDS
+        return value
 
     @field_validator("auto_rerun_on_open", mode="before")
     @classmethod
