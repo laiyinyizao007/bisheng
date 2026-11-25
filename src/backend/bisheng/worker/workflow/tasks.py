@@ -48,6 +48,8 @@ workflow_stateful_worker = StatefulWorker(queue_prefix="workflow_celery", bound_
 _global_workflow: dict[str, Workflow] = {}
 # Which saved pause each in-memory object belongs to (see _warm_copy_is_current)
 _global_workflow_pause_stamp: dict[str, float] = {}
+# When this Worker put each warm copy in memory (local clock); used to release copies nobody came back for
+_global_workflow_parked_at: dict[str, float] = {}
 
 
 def _redis_client():
@@ -88,6 +90,7 @@ def _clear_workflow_obj(unique_id: str):
     """Clear Global Workflow Objects"""
     _drop_pause_state(unique_id)
     _global_workflow_pause_stamp.pop(unique_id, None)
+    _global_workflow_parked_at.pop(unique_id, None)
     if unique_id in _global_workflow:
         del _global_workflow[unique_id]
         logger.debug(f"clear workflow object for unique_id: {unique_id}")
@@ -102,6 +105,23 @@ def _extend_session_record(redis_callback: RedisCallback):
     ttl = getattr(conf, "pause_retention_seconds", DEFAULT_PAUSE_RETENTION_SECONDS) + EXPIRED_NOTICE_GRACE_SECONDS
     if ttl > 3600 * 24 * 7:  # set_workflow_status already keeps the record 7 days
         redis_callback.redis_client.expire_key(redis_callback.workflow_status_key, ttl)
+
+
+def _release_abandoned_warm_copies(retention_seconds: int, now: float | None = None) -> int:
+    """Drop in-memory copies of paused sessions nobody came back for within the retention period.
+
+    The saved state in Redis expires on its own; this only frees the Worker's memory. It runs whenever
+    a run pauses, so no extra timer is needed. Returns how many copies were released.
+    """
+    now = time.time() if now is None else now
+    stale = [uid for uid, parked in _global_workflow_parked_at.items() if now - parked > retention_seconds]
+    for uid in stale:
+        _global_workflow.pop(uid, None)
+        _global_workflow_pause_stamp.pop(uid, None)
+        _global_workflow_parked_at.pop(uid, None)
+    if stale:
+        logger.info("released {} abandoned paused workflow copies from memory", len(stale))
+    return len(stale)
 
 
 def _save_pause_state(redis_callback: RedisCallback, workflow: Workflow):
@@ -129,6 +149,12 @@ def _judge_workflow_status(redis_callback: RedisCallback, workflow: Workflow):
         # Keep the object in memory as a warm cache for the Worker that paused it. This comes first,
         # so a Redis hiccup below never costs the run (the behaviour before F002).
         _global_workflow[redis_callback.unique_id] = workflow
+        _global_workflow_parked_at[redis_callback.unique_id] = time.time()
+        try:
+            conf = settings.get_workflow_conf()
+            _release_abandoned_warm_copies(getattr(conf, "pause_retention_seconds", DEFAULT_PAUSE_RETENTION_SECONDS))
+        except Exception:
+            logger.warning("abandoned paused workflow copies could not be released")
         # F002: also save the resumable state, so any Worker can continue this session
         try:
             _save_pause_state(redis_callback, workflow)
@@ -409,6 +435,7 @@ def _continue_workflow(unique_id: str, workflow_id: str, chat_id: str, user_id: 
                 # another Worker continued this session since; this copy is stale, rebuild from Redis
                 _global_workflow.pop(unique_id, None)
                 _global_workflow_pause_stamp.pop(unique_id, None)
+                _global_workflow_parked_at.pop(unique_id, None)
                 workflow = None
         if not workflow:
             workflow = _restore_paused_workflow(redis_callback, workflow_id, chat_id, user_id, store, conf)

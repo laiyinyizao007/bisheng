@@ -280,3 +280,32 @@ async def test_a_redis_outage_at_the_pause_does_not_lose_the_run(dialogue):
         h.cache.set = original
     assert not [f for f in frames if f["category"] == "error"]
     assert h.model.invoke.call_count == 1
+
+
+async def test_copies_nobody_came_back_for_are_released_from_memory(dialogue):
+    """A paused run whose user never returns must not stay in this Worker's memory forever."""
+    import time
+
+    h = dialogue
+    tasks = import_worker_tasks()
+    async with Socket(h.app) as socket:
+        await initialize(socket)
+    unique_id = _unique_id(h)
+    assert unique_id in tasks._global_workflow
+    # a long time later, the next run that pauses sweeps the abandoned one
+    released = tasks._release_abandoned_warm_copies(retention_seconds=3600, now=time.time() + 3601)
+    assert released == 1
+    assert unique_id not in tasks._global_workflow
+    assert unique_id not in tasks._global_workflow_pause_stamp
+    assert unique_id not in tasks._global_workflow_parked_at
+
+
+async def test_recent_copies_are_kept_by_the_sweep(dialogue):
+    import time
+
+    h = dialogue
+    tasks = import_worker_tasks()
+    async with Socket(h.app) as socket:
+        await initialize(socket)
+    assert tasks._release_abandoned_warm_copies(retention_seconds=3600, now=time.time() + 60) == 0
+    assert _unique_id(h) in tasks._global_workflow

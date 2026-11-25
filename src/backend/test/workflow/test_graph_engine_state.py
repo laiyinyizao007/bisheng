@@ -244,3 +244,31 @@ def test_retrieval_documents_and_citation_items_survive_the_round_trip():
     assert fresh.variables_pool["rag_1"]["source_documents"] == docs
     assert fresh.variables_pool["rag_1"]["citation_items"] == [item]
     assert fresh.variables_pool["code_1"]["result"] == {"n": 1, "ok": True, "tags": ["a", "b"], "none": None}
+
+
+def test_tool_node_outputs_with_web_citations_survive_the_round_trip():
+    """What tool nodes keep in the variable pool: text output, citation registry items, a None placeholder."""
+    import json
+
+    from bisheng.citation.domain.services.citation_prompt_helper import (
+        annotate_web_results_with_citations,
+        collect_web_citation_registry_items,
+    )
+    from bisheng.workflow.common.citation_keys import (
+        WORKFLOW_CITATION_REGISTRY_ITEMS_KEY,
+        WORKFLOW_SOURCE_DOCUMENTS_KEY,
+    )
+
+    results = [{"title": "标准全文", "url": "https://example.com/a", "snippet": "第二十条 ..."}]
+    annotated = annotate_web_results_with_citations(results)
+    items = collect_web_citation_registry_items(annotated)
+    assert items, "the helper should have produced registry items for the sample result"
+
+    gs = GraphState()
+    gs.set_variable("tool_1", "output", json.dumps(annotated, ensure_ascii=False))
+    gs.set_variable("tool_1", WORKFLOW_SOURCE_DOCUMENTS_KEY, None)
+    gs.set_variable("tool_1", WORKFLOW_CITATION_REGISTRY_ITEMS_KEY, items)
+
+    fresh = GraphState()
+    run_state.load_graph_state(fresh, run_state.dump_graph_state(gs))
+    assert fresh.variables_pool == gs.variables_pool

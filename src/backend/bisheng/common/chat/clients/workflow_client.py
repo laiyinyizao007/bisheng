@@ -350,7 +350,8 @@ class WorkflowClient(BaseClient):
     async def handle_user_input(self, data: dict):
         if not await self.ensure_workflow_available(self.client_id):
             return
-        logger.info(f"get user input: {data}")
+        # Only the shape of the payload is logged: what the user typed must not reach the logs.
+        logger.info(f"get user input: client_id={self.client_id} fields={sorted(data) if isinstance(data, dict) else type(data).__name__}")
         if not self.workflow:
             await self.send_response("processing", "close", "")
             return
