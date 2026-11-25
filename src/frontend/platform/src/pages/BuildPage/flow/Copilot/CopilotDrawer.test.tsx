@@ -365,6 +365,61 @@ describe("progress while generating (chat-style)", () => {
         expect(request.history).toEqual([{ role: "user", content: "first" }]);
     });
 
+    it("shows the model's thinking while it reasons, then the YAML under it", async () => {
+        const [status, message, proposal, done] = proposalEvents();
+        const release = gatedStream(
+            [status, { type: "reasoning", text: "Think first: " }, { type: "reasoning", text: "how many nodes." }],
+            [{ type: "draft", text: "nodes: []\n" }, message, proposal, done],
+        );
+        renderDrawer();
+        await send("x");
+        expect(await screen.findByTestId("copilot-reasoning")).toHaveTextContent("Think first: how many nodes.");
+        expect(screen.getByTestId("copilot-progress-title")).toHaveTextContent("Thinking…");
+        await release();
+        await screen.findByTestId("copilot-diff");
+        expect(screen.getByTestId("copilot-progress-title")).toHaveTextContent("Proposal ready");
+        fireEvent.click(screen.getByRole("button", { expanded: false }));
+        expect(screen.getByTestId("copilot-reasoning")).toHaveTextContent("Think first: how many nodes.");
+        expect(screen.getByTestId("copilot-draft")).toHaveTextContent("nodes: []");
+    });
+
+    it("a text answer that came with thinking keeps a folded 'thought' box, and the thinking is not history", async () => {
+        mocks.stream.mockImplementation(
+            streamOf([
+                { type: "status", stage: "generating", attempt: 1 },
+                { type: "reasoning", text: "regex matches partially" },
+                { type: "message", text: "It is a partial match." },
+                { type: "done" },
+            ]),
+        );
+        renderDrawer();
+        await send("is regex a full match?");
+        await screen.findByText("It is a partial match.");
+        expect(screen.getByTestId("copilot-progress-title")).toHaveTextContent("Thought it through");
+        expect(screen.queryByTestId("copilot-reasoning")).toBeNull(); // folded
+        mocks.stream.mockImplementation(streamOf(proposalEvents()));
+        await send("next");
+        const [request] = mocks.stream.mock.calls[1] as [CopilotRequest, AbortSignal];
+        expect(JSON.stringify(request.history)).not.toContain("regex matches partially");
+    });
+
+    it("a retry that is still thinking keeps saying which attempt it is", async () => {
+        const release = gatedStream(
+            [
+                { type: "status", stage: "generating", attempt: 1 },
+                { type: "draft", text: "nodes: [" },
+                { type: "status", stage: "retrying", attempt: 2 },
+                { type: "reasoning", text: "Fix the broken list." },
+            ],
+            [{ type: "issues", issues: ["still wrong"] }, { type: "done" }],
+        );
+        renderDrawer();
+        await send("x");
+        expect(await screen.findByTestId("copilot-reasoning")).toHaveTextContent("Fix the broken list.");
+        expect(screen.getByTestId("copilot-progress-title")).toHaveTextContent("#2");
+        await release();
+    });
+
     it("a plain text answer leaves no progress box behind", async () => {
         mocks.stream.mockImplementation(
             streamOf([

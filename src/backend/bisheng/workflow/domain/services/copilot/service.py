@@ -7,6 +7,8 @@ events:
 
 =============  =====================================================================
 ``status``     ``stage``: ``generating`` / ``retrying`` / ``validating``, ``attempt``
+``reasoning``  a reasoning model's thinking, as it streams — shown only, never part of
+               the answer, the reply or what is fed back on a retry
 ``delta``      model text outside the ```yaml block, as it streams
 ``draft``      the block's body as it streams (fences and info line dropped) — progress
                only: what the model wrote from the masked canvas, before any check
@@ -54,7 +56,9 @@ from loguru import logger
 
 from bisheng.common.constants.enums.telemetry import ApplicationTypeEnum
 from bisheng.common.errcode.flow import WorkflowCopilotModelCallError, WorkflowCopilotTooLargeError
+from bisheng.common.utils.think_tags import strip_reasoning_tags
 from bisheng.llm.domain.services.llm import LLMService
+from bisheng.llm.domain.utils import extract_reasoning_content
 from bisheng.workflow.common.node_templates import NODE_TEMPLATES
 from bisheng.workflow.domain.services.copilot.merge import merge
 from bisheng.workflow.domain.services.copilot.prompt import build_messages, retry_messages
@@ -78,6 +82,8 @@ MAX_CANVAS_NODES = 500
 MAX_CANVAS_EDGES = 2_000
 #: An answer longer than this is cut off: the declaration cap plus room for the text around it.
 MAX_ANSWER_CHARS = 100_000
+#: Reasoning forwarded to the drawer per attempt (a reasoning model wrote ~34k on a real turn).
+MAX_REASONING_CHARS = 40_000
 #: One attempt's model call, start to last chunk (AC-27: a timeout is a failed turn, not a hang).
 MODEL_TIMEOUT_SECONDS = 180.0
 #: All attempts of one turn together; and the most a model stream's cleanup may take.
@@ -168,6 +174,7 @@ class WorkflowCopilotService:
                 yield {"type": "status", "stage": "generating" if attempt == 1 else "retrying", "attempt": attempt}
                 fence = _FenceFilter()
                 answer = shown = ""
+                shown_reasoning = 0
                 too_long = False
                 # The deadline guards only the awaits on the model, never a ``yield``: a
                 # timeout scope left open across a yield would fire in the consumer's frame.
@@ -181,6 +188,18 @@ class WorkflowCopilotService:
                                 chunk = await chunks.__anext__()
                         except StopAsyncIteration:
                             break
+                        # Reasoning models (MiniMax-M3: ~1 minute of it before the first word of
+                        # the answer) stream their thinking beside the content; it is shown in
+                        # the drawer like the chat's thinking box, and kept out of the answer, the
+                        # answer cap, the reply, the retry feedback and the checked proposal.
+                        # The platform's extractor covers every shape a provider uses; markers
+                        # are stripped as in the chat's narration. Capped per attempt: past the
+                        # cap the model keeps running, the drawer just stops receiving it.
+                        reasoning = strip_reasoning_tags(extract_reasoning_content(chunk))
+                        if reasoning and shown_reasoning < MAX_REASONING_CHARS:
+                            reasoning = reasoning[: MAX_REASONING_CHARS - shown_reasoning]
+                            shown_reasoning += len(reasoning)
+                            yield {"type": "reasoning", "text": reasoning}
                         text = chunk.content if isinstance(chunk.content, str) else ""
                         answer += text
                         if len(answer) > MAX_ANSWER_CHARS:

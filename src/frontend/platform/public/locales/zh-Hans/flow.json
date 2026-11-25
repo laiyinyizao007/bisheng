@@ -626,6 +626,8 @@
         "statusGenerating": "正在生成方案…",
         "statusValidating": "正在校验方案…",
         "statusRetrying": "方案未通过校验，正在第 {{attempt}} 次尝试…",
+        "statusThinking": "正在思考…",
+        "progressThought": "已完成思考",
         "progressDone": "方案已生成",
         "progressError": "生成中断",
         "progressFailed": "方案未通过校验",

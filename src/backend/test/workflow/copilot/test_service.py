@@ -19,6 +19,7 @@ from bisheng.common.constants.enums.telemetry import ApplicationTypeEnum
 from bisheng.common.errcode.flow import WorkflowCopilotTooLargeError
 from bisheng.workflow.common.node_templates import NODE_TEMPLATES
 from bisheng.workflow.domain.services.copilot import prompt
+from bisheng.workflow.domain.services.copilot import service as service_module
 from bisheng.workflow.domain.services.copilot.service import WorkflowCopilotService
 from bisheng_flow_dsl.compiler import compile_spec
 from test.workflow.copilot.conftest import make_catalogue
@@ -305,3 +306,67 @@ async def test_history_text_reaches_the_model_and_the_sent_canvas_is_the_base(sc
     sent = state["calls"][0]["messages"]
     assert [kind for kind, _ in sent] == ["SystemMessage", "HumanMessage", "AIMessage", "HumanMessage"]
     assert "start_1" in sent[-1][1]
+
+
+# ---- reasoning (chat-style thinking) ------------------------------------------------------------
+
+
+async def test_reasoning_streams_as_its_own_event_before_the_answer(scripted_llm) -> None:
+    thinking = "先想清楚要几个节点。" * 5
+    scripted_llm((thinking, answer(FULL_FLOW, before="先说明。")))
+    events = await run(prepare())
+    assert "".join(e["text"] for e in of(events, "reasoning")) == thinking
+    kinds = [e["type"] for e in events]
+    assert kinds.index("reasoning") < kinds.index("delta") < kinds.index("draft")
+    # Reasoning is shown, never part of the reply, the history or the checked proposal.
+    assert "节点。" not in of(events, "message")[0]["text"]
+    assert of(events, "proposal")
+
+
+async def test_reasoning_is_not_fed_back_on_a_retry(scripted_llm) -> None:
+    broken = FULL_FLOW.replace("user_prompt:", "no_such_param: x\n      user_prompt:")
+    state = scripted_llm(("第一次的思考", answer(broken)), answer(FULL_FLOW))
+    await run(prepare())
+    retry_prompt = " ".join(str(content) for _, content in state["calls"][1]["messages"])
+    assert "第一次的思考" not in retry_prompt
+
+
+async def test_reasoning_does_not_count_against_the_answer_cap(scripted_llm, monkeypatch) -> None:
+    monkeypatch.setattr(service_module, "MAX_ANSWER_CHARS", len(answer(FULL_FLOW)) + 10)
+    scripted_llm(("想" * 5000, answer(FULL_FLOW)))
+    events = await run(prepare())
+    assert of(events, "proposal") and not of(events, "issues")
+
+
+async def test_reasoning_in_other_shapes_and_think_markers(monkeypatch) -> None:
+    # The platform's extractor (not a hand-read key): reasoning under response_metadata
+    # counts too, and stray <think> markers are stripped like the chat's narration.
+    class Chunk:
+        def __init__(self, content: str, reasoning: str = "") -> None:
+            self.content = content
+            self.additional_kwargs: dict = {}
+            self.response_metadata = {"reasoning": reasoning} if reasoning else {}
+
+    class ShapedLLM:
+        async def astream(self, messages):
+            yield Chunk("", "<think>想一想")
+            yield Chunk("", "要几个节点</think>")
+            text = answer(FULL_FLOW)
+            for start in range(0, len(text), 50):
+                yield Chunk(text[start : start + 50])
+
+    async def factory(**kwargs):
+        return ShapedLLM()
+
+    monkeypatch.setattr(service_module.LLMService, "get_bisheng_llm", factory)
+    events = await run(prepare())
+    assert "".join(e["text"] for e in of(events, "reasoning")) == "想一想要几个节点"
+    assert of(events, "proposal")
+
+
+async def test_reasoning_beyond_its_cap_is_not_forwarded(scripted_llm, monkeypatch) -> None:
+    monkeypatch.setattr(service_module, "MAX_REASONING_CHARS", 20)
+    scripted_llm(("想" * 100, answer(FULL_FLOW)))
+    events = await run(prepare())
+    assert len("".join(e["text"] for e in of(events, "reasoning"))) == 20
+    assert of(events, "proposal")  # the model was not cut off: the answer still arrives

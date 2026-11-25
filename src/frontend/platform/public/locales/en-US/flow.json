@@ -626,6 +626,8 @@
         "statusGenerating": "Generating a proposal…",
         "statusValidating": "Validating the proposal…",
         "statusRetrying": "The proposal did not validate; attempt {{attempt}}…",
+        "statusThinking": "Thinking…",
+        "progressThought": "Thought it through",
         "progressDone": "Proposal ready",
         "progressError": "Generation interrupted",
         "progressFailed": "The proposal did not validate",

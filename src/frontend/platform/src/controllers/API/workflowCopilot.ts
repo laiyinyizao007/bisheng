@@ -67,6 +67,8 @@ export interface CopilotProposal {
 
 export type CopilotEvent =
     | { type: "status"; stage: "generating" | "retrying" | "validating"; attempt: number }
+    /** A reasoning model's thinking as it streams: shown only, never part of the reply. */
+    | { type: "reasoning"; text: string }
     | { type: "delta"; text: string }
     /** The proposal's YAML as the model writes it: progress only, checked later. */
     | { type: "draft"; text: string }
