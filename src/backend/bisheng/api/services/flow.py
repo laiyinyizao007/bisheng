@@ -25,6 +25,7 @@ from bisheng.common.errcode.flow import (
     CurVersionDelError,
     NotFoundVersionError,
     VersionNameExistsError,
+    WorkflowCreateOutsideOwnTenantError,
     WorkflowNameExistsError,
     WorkFlowOnlineEditError,
 )
@@ -389,6 +390,15 @@ class FlowService(BaseService):
         the create-app menu gate + quota) — this method only gates **what**
         may be created.
         """
+        # A super admin managing another tenant (F019 admin scope) is refused before
+        # anything is written. This route is a management route, so the request runs in
+        # the managed tenant; the workflow would be invisible to the editor's business
+        # routes (guest link, test run, copilot, report run in the user's own tenant,
+        # F019 AC-07). Stamping the user's tenant regardless — as this used to — wrote the
+        # row, then failed its own read-back with 500 and left the row behind.
+        context_tenant = get_current_tenant_id()
+        if context_tenant is not None and context_tenant != login_user.tenant_id:
+            raise WorkflowCreateOutsideOwnTenantError.http_exception()
         # Determine if the user repeats the skill name
         with get_sync_db_session() as session:
             if session.exec(
@@ -403,15 +413,9 @@ class FlowService(BaseService):
                 raise WorkflowNameExistsError.http_exception()
         flow.user_id = login_user.user_id
         db_flow = Flow.model_validate(flow)
-        # The request's tenant, as the framework's before_flush hook would fill it:
-        # ``get_current_tenant_id()`` includes the F019 management view, and this is a
-        # management write (it must carry the expected tenant), so a super admin managing
-        # another tenant creates the workflow there. Stamping ``login_user.tenant_id``
-        # instead wrote it into the admin's own tenant, and the read-back after the commit
-        # (filtered by the managed tenant) failed with 500. Callers without an HTTP
-        # middleware (CLI, scripts) have no context and keep the user's own tenant.
-        context_tenant = get_current_tenant_id()
-        db_flow.tenant_id = context_tenant if context_tenant is not None else login_user.tenant_id
+        # Explicit so callers without an HTTP middleware (CLI, scripts) still set it right;
+        # with a context it is the same tenant (checked above).
+        db_flow.tenant_id = login_user.tenant_id
         db_flow.create_time = None
         db_flow.update_time = None
         db_flow.flow_type = FlowType.WORKFLOW.value

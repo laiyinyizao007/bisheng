@@ -84,6 +84,7 @@
   "10542": "You can upload at most 5 files",
   "10543": "Invalid user input for the waiting workflow",
   "10550": "The page cursor has expired. Please refresh the list and try again.",
+  "10570": "Switch the management view back to your own tenant before creating a workflow",
   "10599": "No permission to view",
   "10600": "Incorrect username or password",
   "10601": "Password expired. Please update it",
