@@ -198,3 +198,31 @@ def test_nodes_without_a_step_counter_are_skipped():
     fresh.nodes_map["b_fake"] = SimpleNamespace()
     fresh.import_run_state(data)
     assert fresh.nodes_map["a"].current_step == 2
+
+
+def test_retrieval_documents_and_citation_items_survive_the_round_trip():
+    """What knowledge/RAG nodes keep in the variable pool: LangChain documents and pydantic citation items."""
+    from langchain_core.documents import Document
+
+    from bisheng.citation.domain.schemas.citation_schema import CitationRegistryItemSchema
+
+    docs = [Document(page_content="第二十条 内容", metadata={"citation_key": "k1", "source": "a.pdf", "page": 3})]
+    item = CitationRegistryItemSchema.model_validate(
+        {
+            "citationId": "c1",
+            "type": "rag",
+            "sourcePayload": {"type": "rag"},
+        }
+    )
+    gs = GraphState()
+    gs.set_variable("rag_1", "source_documents", docs)
+    gs.set_variable("rag_1", "citation_items", [item])
+    gs.set_variable("code_1", "result", {"n": 1, "ok": True, "tags": ["a", "b"], "none": None})
+
+    data = run_state.dump_graph_state(gs)
+    fresh = GraphState()
+    run_state.load_graph_state(fresh, data)
+
+    assert fresh.variables_pool["rag_1"]["source_documents"] == docs
+    assert fresh.variables_pool["rag_1"]["citation_items"] == [item]
+    assert fresh.variables_pool["code_1"]["result"] == {"n": 1, "ok": True, "tags": ["a", "b"], "none": None}
