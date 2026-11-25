@@ -43,6 +43,8 @@ from bisheng.common.errcode.flow import WorkFlowPauseStateInvalidError
 workflow_stateful_worker = StatefulWorker(queue_prefix="workflow_celery", bound_nodes_prefix="workflow_bound_nodes:")
 # Stores global workflow objects
 _global_workflow: dict[str, Workflow] = {}
+# Which saved pause each in-memory object belongs to (see _warm_copy_is_current)
+_global_workflow_pause_stamp: dict[str, float] = {}
 
 
 def _pause_store() -> PauseStateStore:
@@ -63,6 +65,7 @@ def _drop_pause_state(unique_id: str):
 def _clear_workflow_obj(unique_id: str):
     """Clear Global Workflow Objects"""
     _drop_pause_state(unique_id)
+    _global_workflow_pause_stamp.pop(unique_id, None)
     if unique_id in _global_workflow:
         del _global_workflow[unique_id]
         logger.debug(f"clear workflow object for unique_id: {unique_id}")
@@ -83,13 +86,14 @@ def _save_pause_state(redis_callback: RedisCallback, workflow: Workflow):
     engine = workflow.graph_engine
     run = engine.export_run_state()
     run["memory_enabled"] = bool(getattr(engine.graph_state, "memory_enabled", False))
-    _pause_store().save(
+    stamp = _pause_store().save(
         redis_callback.unique_id,
         tenant_id=workflow.tenant_id,
         workflow_id=workflow.workflow_id,
         canvas=engine.workflow_data,
         run_state=run,
     )
+    _global_workflow_pause_stamp[redis_callback.unique_id] = stamp
 
 
 def _judge_workflow_status(redis_callback: RedisCallback, workflow: Workflow):
@@ -289,6 +293,17 @@ def execute_workflow(
         _log_workflow_telemetry(workflow_id, chat_id, user_id, start_time)
 
 
+def _warm_copy_is_current(store: PauseStateStore, unique_id: str) -> bool:
+    """A Worker's in-memory copy is only valid while it belongs to the newest saved pause.
+
+    If the session was continued on another Worker in between (the routing can change when
+    Workers come and go), the newest saved pause carries a different stamp.
+    """
+    mine = _global_workflow_pause_stamp.get(unique_id)
+    newest = store.paused_at(unique_id)
+    return mine is None or newest is None or mine == newest
+
+
 def _restore_paused_workflow(redis_callback: RedisCallback, workflow_id: str, chat_id: str, user_id: int):
     """F002: rebuild a paused run from its saved state when this Worker does not hold it in memory.
 
@@ -348,9 +363,15 @@ def _continue_workflow(unique_id: str, workflow_id: str, chat_id: str, user_id: 
     try:
         workflow = _global_workflow.get(redis_callback.unique_id, None)
         if workflow:
+            store = _pause_store()
             # the warm copy must not outlive the retention period either
-            _pause_store().ensure_not_expired(redis_callback.unique_id)
-        else:
+            store.ensure_not_expired(redis_callback.unique_id)
+            if not _warm_copy_is_current(store, redis_callback.unique_id):
+                # another Worker continued this session since; this copy is stale, rebuild from Redis
+                _global_workflow.pop(redis_callback.unique_id, None)
+                _global_workflow_pause_stamp.pop(redis_callback.unique_id, None)
+                workflow = None
+        if not workflow:
             workflow, holds_resume_token = _restore_paused_workflow(redis_callback, workflow_id, chat_id, user_id)
             if workflow is None:
                 return

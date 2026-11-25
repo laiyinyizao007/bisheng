@@ -14,12 +14,14 @@ Nothing here logs a payload: logs carry the session id, sizes and outcomes only.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from loguru import logger
 
+from bisheng.workflow.graph.run_state import RunStateError
 from bisheng.common.errcode.flow import (
     WorkFlowPauseStateExpiredError,
     WorkFlowPauseStateInvalidError,
@@ -30,6 +32,8 @@ SNAPSHOT_FORMAT = 1
 EXPIRED_NOTICE_GRACE_SECONDS = 24 * 3600
 #: Safety expiry of the resume token; the token is normally released as soon as the run yields.
 RESUME_LOCK_SECONDS = 3600
+#: Upper bound of one saved snapshot (serialized size). Larger runs fail at the pause with a readable reason.
+MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
 
 
 class PauseStateNotFound(Exception):
@@ -62,7 +66,11 @@ class PauseStateStore:
         self.retention_seconds = int(retention_seconds)
         self.clock = clock
 
-    def save(self, unique_id: str, *, tenant_id: int, workflow_id: str, canvas: dict, run_state: dict) -> None:
+    def save(self, unique_id: str, *, tenant_id: int, workflow_id: str, canvas: dict, run_state: dict) -> float:
+        """Save the snapshot and return its ``paused_at`` stamp (identifies this particular pause)."""
+        size = len(json.dumps(run_state, default=str)) + len(json.dumps(canvas, default=str))
+        if size > MAX_SNAPSHOT_BYTES:
+            raise RunStateError("the workflow state is too large to save (over %d MiB)" % (MAX_SNAPSHOT_BYTES // 1024 // 1024))
         now = self.clock()
         expires_at = now + self.retention_seconds
         snapshot: dict[str, Any] = {
@@ -80,7 +88,8 @@ class PauseStateStore:
             {"paused_at": now, "expires_at": expires_at},
             expiration=self.retention_seconds + EXPIRED_NOTICE_GRACE_SECONDS,
         )
-        logger.info("workflow pause state saved unique_id={} retention_s={}", unique_id, self.retention_seconds)
+        logger.info("workflow pause state saved unique_id={} bytes={} retention_s={}", unique_id, size, self.retention_seconds)
+        return now
 
     def load(self, unique_id: str, *, tenant_id: int, workflow_id: str) -> PauseSnapshot:
         meta = self.redis.get(_meta_key(unique_id))
@@ -118,6 +127,12 @@ class PauseStateStore:
             paused_at=float(snapshot.get("paused_at") or 0),
             expires_at=float(snapshot.get("expires_at") or 0),
         )
+
+    def paused_at(self, unique_id: str) -> float | None:
+        """The stamp of the newest saved pause of the session, or None if nothing is saved."""
+        meta = self.redis.get(_meta_key(unique_id))
+        value = meta.get("paused_at") if isinstance(meta, dict) else None
+        return float(value) if isinstance(value, (int, float)) else None
 
     def ensure_not_expired(self, unique_id: str) -> None:
         """Raise the expiry error if the session's retention period is over (a missing marker is fine)."""

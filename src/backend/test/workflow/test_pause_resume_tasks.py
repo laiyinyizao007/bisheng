@@ -166,3 +166,31 @@ async def test_the_warm_in_memory_copy_is_not_resumable_after_the_retention_peri
     errors = [f for f in frames if f["category"] == "error"]
     assert errors and errors[-1]["message"]["status_code"] == 10544
     assert h.model.invoke.call_count == 0
+
+
+async def test_a_stale_warm_copy_is_not_used_after_another_worker_continued_the_session(dialogue):
+    """If the session was continued elsewhere since this Worker paused it, its in-memory copy is stale."""
+    h = dialogue
+    tasks = import_worker_tasks()
+
+    class Stale:
+        """Stands in for an out-of-date object; using it would break the run."""
+
+        tenant_id = 101
+        workflow_id = FID
+
+        def status(self):
+            raise AssertionError("the stale in-memory copy must not be used")
+
+    async with Socket(h.app) as socket:
+        prompt = await initialize(socket)
+        unique_id = _keys(h, ":pause")[0].split(":")[1]
+        tasks._global_workflow[unique_id] = Stale()
+        for key in _keys(h, ":pause_meta"):
+            value = h.cache.get(key)
+            value["paused_at"] = value["paused_at"] + 5  # a newer pause was saved by another Worker
+            h.cache.set(key, value)
+        await socket.send(answer(prompt))
+        frames = await socket.until("processing", "close")
+    assert not [f for f in frames if f["category"] == "error"]
+    assert h.model.invoke.call_count == 1

@@ -208,3 +208,27 @@ def test_ensure_not_expired_raises_after_the_retention_period(env):
     clock.now += RETENTION + 1
     with pytest.raises(WorkFlowPauseStateExpiredError):
         store.ensure_not_expired("u1")
+
+
+def test_save_returns_the_stamp_that_paused_at_reports(env):
+    store, _, _ = env
+    stamp = store.save("u1", tenant_id=7, workflow_id="wf1", canvas=CANVAS, run_state=RUN_STATE)
+    assert store.paused_at("u1") == stamp
+    assert store.paused_at("nothing") is None
+
+
+def test_a_newer_save_changes_the_stamp(env):
+    store, _, clock = env
+    first = store.save("u1", tenant_id=7, workflow_id="wf1", canvas=CANVAS, run_state=RUN_STATE)
+    clock.now += 5
+    second = store.save("u1", tenant_id=7, workflow_id="wf1", canvas=CANVAS, run_state=RUN_STATE)
+    assert second != first and store.paused_at("u1") == second
+
+
+def test_an_oversized_snapshot_is_refused_with_a_readable_reason(env, monkeypatch):
+    store, redis, _ = env
+    monkeypatch.setattr(pause_state, "MAX_SNAPSHOT_BYTES", 100)
+    with pytest.raises(RunStateError) as exc:
+        store.save("u1", tenant_id=7, workflow_id="wf1", canvas={"nodes": ["x" * 500]}, run_state=RUN_STATE)
+    assert "too large" in str(exc.value)
+    assert redis.get("workflow:u1:pause") is None
