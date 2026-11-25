@@ -183,3 +183,12 @@ def test_fixtures_compile_and_validate(name: str) -> None:
 
     compiled = compile_spec(fill_model(load_fixture(name), 1), NODE_TEMPLATES, [])
     assert validate(compiled, NODE_TEMPLATES, []) == []
+
+
+def test_disabled_cases_are_not_run_and_say_why() -> None:
+    ids = {case["id"] for case in load_cases()}
+    assert "clear-calculator" not in ids  # the preset calculator tool has no parameters
+    assert "clear-web-reader" in ids
+    from test.workflow.copilot.eval.cases import disabled_cases
+
+    assert "参数" in disabled_cases()["clear-calculator"]

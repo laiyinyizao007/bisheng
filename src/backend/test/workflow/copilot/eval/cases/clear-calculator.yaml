@@ -1,3 +1,4 @@
+disabled: 平台预置的「计算器」工具没有参数（工具参数为空），用例要求的「计算器工具节点」无法正确实现；改用 clear-web-reader
 id: clear-calculator
 group: clear
 canvas: empty

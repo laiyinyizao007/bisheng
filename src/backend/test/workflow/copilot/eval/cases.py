@@ -21,12 +21,24 @@ def load_cases(only: list[str] | None = None) -> list[dict[str, Any]]:
     for path in sorted(CASES_DIR.glob("*.yaml")):
         case = yaml.safe_load(path.read_text(encoding="utf-8"))
         _validate(case, path)
+        if case.get("disabled"):
+            continue  # kept for the record; see disabled_cases()
         if not only or case["id"] in only:
             cases.append(case)
     if only and len(cases) != len(set(only)):
         missing = set(only) - {case["id"] for case in cases}
         raise ValueError(f"unknown case ids: {sorted(missing)}")
     return cases
+
+
+def disabled_cases() -> dict[str, str]:
+    """Cases taken out of the evaluation, with the reason recorded in the case itself."""
+    found = {}
+    for path in sorted(CASES_DIR.glob("*.yaml")):
+        case = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if case.get("disabled"):
+            found[case["id"]] = str(case["disabled"])
+    return found
 
 
 def load_fixture(name: str) -> dict[str, Any]:

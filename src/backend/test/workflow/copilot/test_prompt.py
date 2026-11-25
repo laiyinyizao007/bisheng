@@ -191,3 +191,16 @@ def test_answer_format_defines_the_ask_block_and_the_proposal_notes() -> None:
     for must in ("```ask", "question:", "options:", "最多 3", "2–4", "不要输出 yaml", "假设：", "做不到 / 替代："):
         assert must in fmt, must
     assert "需求不清楚就追问" not in fmt  # replaced by the explicit check above
+
+
+def test_boundaries_and_currency_are_always_key_points() -> None:
+    # F008 evaluation (option A, first run): the model decided "≥ 1000" itself and wrote it
+    # as an assumption; boundaries and currency now count as key points unless stated.
+    section = prompt.PREFACE[prompt.PREFACE.index("# 需求检查") : prompt.PREFACE.index("# 回答格式")]
+    assert "条件判断里的数值边界" in section and "金额的币种" in section
+    assert "除非用户已经明确说了" in section
+
+
+def test_a_build_request_never_ends_in_text_only() -> None:
+    section = prompt.PREFACE[prompt.PREFACE.index("# 回答格式") : prompt.PREFACE.index("# 修改已有工作流")]
+    assert "要么输出 ```ask，要么输出 ```yaml" in section

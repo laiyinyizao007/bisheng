@@ -223,10 +223,10 @@ def test_fixture_model_placeholder_is_replaced(value) -> None:
 
 
 def test_cases_whose_platform_preconditions_do_not_hold_are_skipped() -> None:
-    cases = [CASES["cannot-code-node"], CASES["clear-calculator"]]
+    cases = [CASES["cannot-code-node"], CASES["clear-web-reader"]]
     assert CASES["cannot-code-node"]["requires"] == {"code_node_enabled": False}
     kept, skipped = run_eval.applicable(cases, {"code_node_enabled": True})
-    assert [c["id"] for c in kept] == ["clear-calculator"]
+    assert [c["id"] for c in kept] == ["clear-web-reader"]
     assert skipped == [{"id": "cannot-code-node", "requires": {"code_node_enabled": False}}]
     kept, skipped = run_eval.applicable(cases, {"code_node_enabled": False})
     assert len(kept) == 2 and skipped == []

@@ -86,10 +86,12 @@ MAX_CANVAS_EDGES = 2_000
 MAX_ANSWER_CHARS = 100_000
 #: Reasoning forwarded to the drawer per attempt (a reasoning model wrote ~34k on a real turn).
 MAX_REASONING_CHARS = 40_000
-#: One attempt's model call, start to last chunk (AC-27: a timeout is a failed turn, not a hang).
-MODEL_TIMEOUT_SECONDS = 180.0
+#: Silence allowed between two chunks of a model stream, reasoning included (AC-27: a timeout
+#: is a failed turn, not a hang). F008: a reasoning model thinks for minutes while streaming,
+#: so a stream is cut off only when it stops producing anything — not after a fixed total.
+IDLE_TIMEOUT_SECONDS = 60.0
 #: All attempts of one turn together; and the most a model stream's cleanup may take.
-TURN_TIMEOUT_SECONDS = 300.0
+TURN_TIMEOUT_SECONDS = 600.0
 CLOSE_TIMEOUT_SECONDS = 5.0
 #: How deep the answer's YAML may nest; nothing in a declaration comes close.
 MAX_YAML_DEPTH = 32
@@ -178,15 +180,16 @@ class WorkflowCopilotService:
                 answer = shown = ""
                 shown_reasoning = 0
                 too_long = False
-                # The deadline guards only the awaits on the model, never a ``yield``: a
-                # timeout scope left open across a yield would fire in the consumer's frame.
-                deadline = min(asyncio.get_running_loop().time() + MODEL_TIMEOUT_SECONDS, turn_deadline)
+                # Each await on the model gets its own idle deadline (capped by the turn's);
+                # the scope guards only that await, never a ``yield``: a timeout scope left open
+                # across a yield would fire in the consumer's frame.
+                loop = asyncio.get_running_loop()
                 stream = llm.astream(_as_langchain(messages))
                 chunks = stream.__aiter__()
                 try:
                     while True:
                         try:
-                            async with asyncio.timeout_at(deadline):
+                            async with asyncio.timeout_at(min(loop.time() + IDLE_TIMEOUT_SECONDS, turn_deadline)):
                                 chunk = await chunks.__anext__()
                         except StopAsyncIteration:
                             break
