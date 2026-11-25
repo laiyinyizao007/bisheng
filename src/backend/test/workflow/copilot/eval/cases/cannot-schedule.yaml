@@ -1,0 +1,21 @@
+id: cannot-schedule
+group: cannot_do
+canvas: empty
+request: 每天早上 9 点自动生成一份行业新闻摘要，发到我的邮箱。
+ask: {}
+answers:
+  _extra: 我的邮箱是 me@example.com；新闻用联网搜索工具找
+must: []
+cannot_do:
+- capability: 定时触发
+  alternative_hint:
+  - 手动
+  - 外部
+  - 定时任务
+  - 接口
+  - API
+  - 调用
+assume: []
+walkthrough:
+- input: （运行一次）
+  expect: 搜索新闻、生成摘要并发邮件；定时需要平台外的调度来触发

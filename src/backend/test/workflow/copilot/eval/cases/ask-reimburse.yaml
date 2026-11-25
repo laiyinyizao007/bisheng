@@ -1,0 +1,39 @@
+id: ask-reimburse
+group: should_ask
+canvas: empty
+request: 做一个报销助手工作流：开始后让用户输入报销事由和金额（一句话，比如“出差打车 86.5 元”）；用大模型提取类别和金额；金额大于 500 的走审批，否则输出“已自动通过”；处理完回到输入让用户继续报下一笔，输入“结束”就结束。
+ask:
+  currency:
+  - 币种
+  - 外币
+  - 美元
+  - 汇率
+  - 人民币
+  approval:
+  - 审批
+  - 怎么发起
+  - 通知
+  - 发给谁
+  - 邮件
+answers:
+  currency: 可能是外币，按固定汇率换算成人民币再判断：1 美元 = 7.2 元，1 欧元 = 7.8 元
+  approval: 用发送邮件工具发给主管 boss@example.com
+  _extra: 等于 500 也要走审批
+must:
+- node_type: tool
+  tool: 发送邮件
+- condition_op:
+  - greater_than_or_equal
+cannot_do:
+- capability: 审批节点
+  alternative_hint:
+  - 邮件
+  - 飞书
+  - 钉钉
+  - 企业微信
+assume: []
+walkthrough:
+- input: 报销claude code 500$ 研发用
+  expect: 识别为美元，折合约 3600 元人民币，走审批分支并发出审批邮件
+- input: 出差打车 86.5 元
+  expect: 人民币 86.5 元，低于 500，输出已自动通过

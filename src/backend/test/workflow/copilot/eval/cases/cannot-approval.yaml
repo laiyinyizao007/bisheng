@@ -1,0 +1,19 @@
+id: cannot-approval
+group: cannot_do
+canvas: empty
+request: 员工提交请假申请后发起审批，主管同意了就回复申请人“已批准”。
+ask: {}
+answers:
+  _extra: 用邮件通知主管 boss@example.com
+must: []
+cannot_do:
+- capability: 审批节点
+  alternative_hint:
+  - 邮件
+  - 飞书
+  - 钉钉
+  - 企业微信
+assume: []
+walkthrough:
+- input: 请假 3 天，事由：家中有事
+  expect: 通知主管（例如发邮件）；说明无法等待主管在平台内审批的结果

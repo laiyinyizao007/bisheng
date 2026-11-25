@@ -1,0 +1,14 @@
+id: modify-add-compress
+group: modify
+canvas: qa_loop
+request: 在输出回答之前，加一个大模型节点把回答压缩到 50 字以内，输出压缩后的内容。
+ask: {}
+answers: {}
+must:
+- node_type: llm
+  min: 2
+cannot_do: []
+assume: []
+walkthrough:
+- input: 介绍一下太阳系
+  expect: 先回答，再压缩到 50 字以内，输出压缩后的内容

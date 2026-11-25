@@ -1,0 +1,16 @@
+id: modify-add-branch
+group: modify
+canvas: qa_loop
+request: 如果用户输入“人工”，就输出“已为你转人工客服”并结束；否则照常回答。
+ask: {}
+answers: {}
+must:
+- node_type: condition
+- node_type: end
+cannot_do: []
+assume: []
+walkthrough:
+- input: 人工
+  expect: 输出已为你转人工客服并结束
+- input: 怎么退货
+  expect: 照常由大模型回答

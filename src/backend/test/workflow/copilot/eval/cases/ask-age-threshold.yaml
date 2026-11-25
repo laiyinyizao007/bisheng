@@ -1,0 +1,23 @@
+id: ask-age-threshold
+group: should_ask
+canvas: empty
+request: 用户输入年龄，未成年就提示“需要家长同意”，否则输出“欢迎使用”。
+ask:
+  threshold:
+  - '18'
+  - 几岁
+  - 多少岁
+  - 标准
+  - 未成年
+  - 怎么算
+answers:
+  threshold: 18 岁以下（不含 18 岁）算未成年；输入不是数字时提示重新输入
+must:
+- node_type: condition
+cannot_do: []
+assume: []
+walkthrough:
+- input: '18'
+  expect: 18 岁不算未成年，输出欢迎使用
+- input: '16'
+  expect: 未成年，提示需要家长同意

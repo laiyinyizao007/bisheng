@@ -1,0 +1,17 @@
+id: modify-threshold
+group: modify
+canvas: discount
+request: 把打折门槛改成 800，等于 800 也打折。
+ask: {}
+answers: {}
+must:
+- condition_op:
+  - greater_than_or_equal
+  right_value: '800'
+cannot_do: []
+assume: []
+walkthrough:
+- input: '800'
+  expect: 等于 800，打折
+- input: '799'
+  expect: 不打折

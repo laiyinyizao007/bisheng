@@ -1,0 +1,43 @@
+name: 折扣计算
+nodes:
+  - id: start_1
+    type: start
+  - id: ask
+    type: input
+    name: 输入订单金额
+  - id: amount
+    type: llm
+    name: 提取金额
+    params:
+      model_id: __DEFAULT_MODEL__
+      system_prompt: 只输出用户输入中的金额数字，不要单位和其他文字。
+      user_prompt: "{{#ask.user_input#}}"
+  - id: gate
+    type: condition
+    name: 是否打折
+    cases:
+      - id: discount
+        conditions:
+          - left: amount.output
+            op: greater_than
+            value: "1000"
+  - id: with_discount
+    type: output
+    name: 打九折
+    params:
+      message: {msg: "订单金额超过 1000，打九折", files: []}
+  - id: no_discount
+    type: output
+    name: 不打折
+    params:
+      message: {msg: "不打折", files: []}
+  - id: end_1
+    type: end
+edges:
+  - {from: start_1, to: ask}
+  - {from: ask, to: amount}
+  - {from: amount, to: gate}
+  - {from: gate, to: with_discount, handle: discount}
+  - {from: gate, to: no_discount}
+  - {from: with_discount, to: end_1}
+  - {from: no_discount, to: end_1}
