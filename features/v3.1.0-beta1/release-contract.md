@@ -16,6 +16,7 @@
 | `bisheng flow` 命令族与项目内工作流绑定 | F005-workflow-as-code（本版本） | CLI 侧的声明编译、对比、推送、运行与工具注册（编译 / 校验 / 对比 / 反编译的规则实现自 F007 起在中立包 `src/backend/bisheng_flow_dsl/`，平台后端与 CLI 共用这一份，随 CLI wheel 打包；CLI 经 `bisheng_cli/flow/dsl.py` 使用）；项目内 `.bisheng/flow.json`（进 git）与 `.bisheng/cache/`（不进 git）只存标识与本地缓存，不是任何平台数据的真相源 |
 | 开发者技能包「工作流声明」（`workflow-as-code`） | F006-flow-yaml-skill（本版本） | 技能包源码在 `dev_toolkit/skills/workflow-as-code/`，经既有技能包分发端点发布、由 `bisheng skills sync` 默认同步；只消费 F005 的节点模板与 `bisheng flow` 契约，不改动它们；参数表与模板的一致性由 CLI 测试守住 |
 | 工作流编辑页 copilot（自然语言生成 / 修改工作流的方案与差异预览） | F007-workflow-copilot（本版本） | 只产出方案并在用户点「应用」后改写编辑页画布，不保存、不上线、不运行；不新增对话存储；模型取既有「工作流默认模型」，资源只在用户有权使用的范围内匹配；编译与校验复用 F005 的同一套实现，知识来源复用 F006 技能包，不留副本 |
+| copilot 生成质量：先问再做（澄清卡片）、写明假设与做不到、离线评测集 | F008-copilot-generation-quality（本版本） | 只改 F007 copilot 的提示词、回答解析与抽屉（新增 `ask` 事件与澄清卡片）；不新增节点类型与存储；评测集与脚本在 `src/backend/test/workflow/copilot/eval/`，调用真实平台与模型，只手动运行、不进 CI |
 
 ## 表 2：跨 Feature 不变量
 
@@ -31,6 +32,7 @@
 | F005-workflow-as-code | 发版线既有工作流与版本服务、工具服务、F048 资源授权、F053 开放平台身份与权限位注册表、`bisheng` CLI（login / 凭据 / 输出契约）、v2 工作流运行端点 | v2 运行端点新增放行带失败原因的节点结束事件（成功事件流不变）；前端节点面板改从后端取模板 |
 | F006-flow-yaml-skill | F005-workflow-as-code（节点模板、编译器 / 校验器、`bisheng flow` 命令族）、F053 开发者技能包分发与接入 | 只新增一份技能包并把它加进 `skills sync` 的默认同步列表；平台早于本包时同步沿用既有「跳过」行为 |
 | F007-workflow-copilot | F005-workflow-as-code（节点模板、编译器 / 校验器、diff）、F006-flow-yaml-skill（技能包）、发版线既有系统模型配置（工作流默认模型）、F048 资源授权、工作流编辑页（画布 / 撤销 / 测试运行面板）、`@bisheng/chat` 会话输入组件 | 编辑页新增右侧抽屉；新增画布到工作流声明的反向转换（CLI 同时获得导出能力） |
+| F008-copilot-generation-quality | F007-workflow-copilot（抽屉、对话、方案预览、推理显示、结构校验与重试） | 新增 `ask` 事件；copilot 单次尝试的超时改为「首个分片 180 秒、之后 60 秒无输出」，整轮上限 600 秒 |
 
 ## 已分配模块编码（MMMEE）
 
@@ -47,3 +49,4 @@
 | 2026-11-23 | 登记开发者技能包「工作流声明」：教 AI 编程助手按自然语言需求写 `flow.yaml` 并走 `bisheng flow`；小功能档，规格已确认 | F006-flow-yaml-skill |
 | 2026-11-23 | 登记工作流编辑页 copilot：自然语言生成 / 修改工作流、差异预览后应用到画布；Full SDD，规格待确认 | F007-workflow-copilot |
 | 2026-11-24 | F007 规格与设计已确认，代码已实现。<br>• 编译 / 校验 / 对比 / 反编译规则迁入中立包 `bisheng_flow_dsl`，平台后端与 CLI 共用；CLI 新增 `flow export`。<br>• 占用错误码 10560–10563。<br>• G8 两轮审查的问题已修复，包括画布凭据不进提示词、各项长度上限、超时。<br>• 隔离环境端到端（MiniMax）通过；TC-CPL-010/011 因环境无向量模型未执行 | F007-workflow-copilot、F005-workflow-as-code |
+| 2026-11-25 | 登记 copilot 生成质量：关键点先问（澄清卡片）、写明假设、说清做不到并给替代、离线评测集；Full SDD，规格与设计已确认，代码已实现；评测：应先问命中 93%、误问 0%、做不到说明 100%、结构 100%（基线 0% / 0% / 56% / 100%） | F008-copilot-generation-quality、F007-workflow-copilot |
