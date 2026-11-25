@@ -1,7 +1,8 @@
 import { Button } from '@bisheng/ui';
 import { Outlined } from "bisheng-icons";
-import { ZoomIn,ZoomOut } from "lucide-react";
+import { LayoutGrid,ZoomIn,ZoomOut } from "lucide-react";
 import { forwardRef } from "react";
+import { useTranslation } from "react-i18next";
 
 
 import { cn } from "@/util/utils";
@@ -14,8 +15,9 @@ useStore
 
 export const Controls = forwardRef<
     HTMLDivElement,
-    Omit<PanelProps, "children"> & { onCreateNote: () => void }
->(({ className, ...props }) => {
+    Omit<PanelProps, "children"> & { onCreateNote: () => void; onAutoLayout: () => void }
+>(({ className, onAutoLayout, ...props }) => {
+    const { t } = useTranslation("flow");
     // const { zoom } = useViewport();
     const { zoomTo, zoomIn, zoomOut, fitView } = useReactFlow();
 
@@ -50,6 +52,9 @@ export const Controls = forwardRef<
             </Button>
             <Button variant="text" size="medium" onClick={() => fitView({ duration: 300 })} color="default" iconOnly>
                 <Outlined.FullScreen className="size-5" />
+            </Button>
+            <Button variant="text" size="medium" onClick={onAutoLayout} color="default" iconOnly aria-label={t("autoLayout")} title={t("autoLayout")}>
+                <LayoutGrid className="size-5" />
             </Button>
             <Button variant="text" size="medium" className="gap-0.5" onClick={props.onCreateNote} color="default" iconOnly>
                 <span>+</span>

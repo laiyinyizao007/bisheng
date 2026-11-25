@@ -1,4 +1,5 @@
 {
+  "autoLayout": "Auto layout",
   "customAssistant": "Custom Assistant",
   "createAppWithNoCode": "Create applications with no code by describing roles and tasks",
   "assistantCanUseSkillsAndTools": "The assistant can use multiple skills and tools",

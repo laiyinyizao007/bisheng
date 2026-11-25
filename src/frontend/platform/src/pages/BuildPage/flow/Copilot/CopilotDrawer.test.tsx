@@ -140,8 +140,20 @@ describe("a turn", () => {
         await send("add a summary node");
         fireEvent.click(await screen.findByText("Apply"));
         expect(mocks.confirm).not.toHaveBeenCalled();
-        expect(props.onApply).toHaveBeenCalledWith({ nodes: PROPOSED.nodes, edges: PROPOSED.edges });
+        // The proposal adds a node, so the editor is asked to re-lay the canvas out.
+        expect(props.onApply).toHaveBeenCalledWith({ nodes: PROPOSED.nodes, edges: PROPOSED.edges }, { layout: true });
         expect(screen.getByTestId("copilot-outcome")).toHaveTextContent("Applied");
+    });
+
+    it("a proposal that only changes parameters keeps the layout as it is", async () => {
+        const events = proposalEvents();
+        const proposal = events[2] as Extract<CopilotEvent, { type: "proposal" }>;
+        proposal.diff = { ...proposal.diff, nodes_only_local: [], nodes_changed: [{ id: "start_1", fields: [], params: [{ key: "guide_word", online: "", local: "hi" }] }] };
+        mocks.stream.mockImplementation(streamOf(events));
+        const { props } = renderDrawer();
+        await send("greet");
+        fireEvent.click(await screen.findByText("Apply"));
+        expect(props.onApply).toHaveBeenCalledWith(expect.anything(), { layout: false });
     });
 
     it("selecting a node after sending is not an edit", async () => {

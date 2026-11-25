@@ -327,4 +327,5 @@
 - G8 两轮审查后的加固：新模块 `copilot/redact.py`、各项上限与超时、带不过去的节点保留、资源清单缓存 → design.md 修订历史 2026-11-24 第 2、3 条。
 - `base_digest` 不由后端下发，改由前端在发送时自己计算 → design.md 修订历史 2026-11-24 第 2 条。
 - 端到端发现失败原因显示后端英文文案，已改为按错误码本地化（125915fb94）→ test-cases.md TC-CPL-015。
-- 试用反馈：生成过程改为 chat 模式的交互（`draft` 事件、`MessageBubble`、进度折叠框），新文件 `Copilot/CopilotProgress.tsx` → design.md 修订历史 2026-11-24 最后一条。
+- 试用反馈：生成过程改为 chat 模式的交互（`draft` 事件、`MessageBubble`、进度折叠框），新文件 `Copilot/CopilotProgress.tsx` → design.md 修订历史 2026-11-24「生成过程的交互改为参照 chat 模式」及其后三轮 G8 各条。
+- 用户要求：自动布局（照 arksusdemo），新文件 `flow/autoLayout.ts`，工具栏按钮 + Copilot 应用时重排 → design.md 修订历史 2026-11-24 最后一条。
