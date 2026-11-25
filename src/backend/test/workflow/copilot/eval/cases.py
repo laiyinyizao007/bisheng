@@ -12,7 +12,7 @@ CASES_DIR = HERE / "cases"
 FIXTURES_DIR = HERE / "fixtures"
 GROUPS = ("clear", "should_ask", "cannot_do", "modify")
 _LISTS = ("must", "cannot_do", "assume", "walkthrough")
-_MAPS = ("ask", "answers")
+_MAPS = ("ask", "answers", "requires")  # requires: platform switches the case assumes
 
 
 def load_cases(only: list[str] | None = None) -> list[dict[str, Any]]:

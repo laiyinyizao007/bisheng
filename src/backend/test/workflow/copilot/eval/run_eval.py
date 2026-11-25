@@ -60,6 +60,20 @@ class Budget:
             self.used += 1
 
 
+def applicable(
+    cases: list[dict[str, Any]], switches: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Cases whose ``requires`` hold on this platform, and the ones skipped (reported, never scored)."""
+    kept, skipped = [], []
+    for case in cases:
+        needed = case.get("requires") or {}
+        if all(switches.get(key) == value for key, value in needed.items()):
+            kept.append(case)
+        else:
+            skipped.append({"id": case["id"], "requires": needed})
+    return kept, skipped
+
+
 def fill_model(value: Any, model_id: int) -> Any:
     """Put the platform's workflow default model where a fixture says ``__DEFAULT_MODEL__``."""
     if value == "__DEFAULT_MODEL__":
@@ -339,6 +353,8 @@ def main(argv: list[str] | None = None) -> int:
         api = BishengApi(platform_client, token=token, tenant=os.environ.get("BISHENG_EVAL_TENANT") or None)
         judge = Judge(judge_client, model=judge_model)
         templates, tools, model_id = api.templates(), api.tools(), api.default_model()
+        switches = api.platform_switches()
+        cases, skipped = applicable(cases, switches)
         for _ in CALIBRATION:
             budget.take()
         calibration = [{k: checks.scrub(str(v), hidden) for k, v in item.items()} for item in judge.calibrate()]
@@ -371,6 +387,8 @@ def main(argv: list[str] | None = None) -> int:
         "runs": len(runs),
         "default_model_id": model_id,
         "judge_model": judge_model,
+        "platform": switches,
+        "skipped": skipped,
         "judge_calibrated": calibrated,
         "model_calls": budget.used,
         "elapsed_s": round(time.monotonic() - started),

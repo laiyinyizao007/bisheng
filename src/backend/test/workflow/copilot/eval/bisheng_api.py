@@ -61,6 +61,11 @@ class BishengApi:
         if tenant:
             self._client.headers["X-Management-Tenant"] = tenant
 
+    def platform_switches(self) -> dict[str, Any]:
+        """Platform switches a case may depend on (``requires`` in a case), as ``/api/v1/env`` reports them."""
+        workflow = (_data(self._client.get("/api/v1/env")) or {}).get("workflow") or {}
+        return {"code_node_enabled": bool(workflow.get("code_node_enabled"))}
+
     def templates(self) -> list[dict[str, Any]]:
         return _data(self._client.get("/api/v1/workflow/node_templates")) or []
 

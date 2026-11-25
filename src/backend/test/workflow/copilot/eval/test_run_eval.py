@@ -220,3 +220,23 @@ def test_report_renders_rates_with_intervals(tmp_path) -> None:
 @pytest.mark.parametrize("value", ["__DEFAULT_MODEL__", {"a": ["__DEFAULT_MODEL__"]}])
 def test_fixture_model_placeholder_is_replaced(value) -> None:
     assert "__DEFAULT_MODEL__" not in json.dumps(run_eval.fill_model(value, 7))
+
+
+def test_cases_whose_platform_preconditions_do_not_hold_are_skipped() -> None:
+    cases = [CASES["cannot-code-node"], CASES["clear-calculator"]]
+    assert CASES["cannot-code-node"]["requires"] == {"code_node_enabled": False}
+    kept, skipped = run_eval.applicable(cases, {"code_node_enabled": True})
+    assert [c["id"] for c in kept] == ["clear-calculator"]
+    assert skipped == [{"id": "cannot-code-node", "requires": {"code_node_enabled": False}}]
+    kept, skipped = run_eval.applicable(cases, {"code_node_enabled": False})
+    assert len(kept) == 2 and skipped == []
+
+
+def test_platform_switches_are_read_from_env() -> None:
+    class EnvPlatform(FakePlatform):
+        def handler(self, request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/api/v1/env":
+                return httpx.Response(200, json={"status_code": 200, "data": {"workflow": {"code_node_enabled": True}}})
+            return super().handler(request)
+
+    assert api(EnvPlatform([])).platform_switches() == {"code_node_enabled": True}
