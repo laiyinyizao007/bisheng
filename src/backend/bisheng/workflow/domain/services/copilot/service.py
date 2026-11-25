@@ -16,6 +16,8 @@ events:
 ``proposal``   ``canvas`` (merged), ``diff`` (of the merged canvas), ``needs_selection``,
                ``replaced``
 ``issues``     three attempts failed: the human-readable problems (AC-10)
+``ask``        F008: the model asks first — ``questions`` ``[{id, question, options}]``
+               (at most 3, 2 to 4 options each); the turn ends, nothing is proposed
 ``error``      ``code`` 10563 and the exception *class* — never its text (AC-25)
 =============  =====================================================================
 
@@ -241,7 +243,19 @@ class WorkflowCopilotService:
 
                 # The reply and the block come from the same split the stream showed.
                 reply = _tidy(shown)
-                block = fence.yaml_block()
+                block, questions, unparsed = _answer_parts(fence)
+                if questions is not None:
+                    reply = _tidy(reply + ("\n\n" + _TRIMMED if questions.trimmed else ""))
+                if block is None and questions is not None:
+                    # F008: the model asks first; the turn ends here, nothing to retry.
+                    outcome = "ask"
+                    yield {"type": "message", "text": reply}
+                    yield {"type": "ask", "questions": questions.items}
+                    return
+                if unparsed:
+                    reply = _tidy(reply + "\n\n" + "\n\n".join(unparsed))
+                if questions is not None:  # a proposal came too: it wins, the questions become text
+                    reply = _tidy(reply + "\n\n" + questions_text(questions.items))
                 if block is None and attempt == 1:
                     outcome = "text"
                     yield {"type": "message", "text": reply}
@@ -492,6 +506,99 @@ def _reachability(definition: dict[str, Any], sent: dict[str, Any]) -> list[str]
 
 
 _STREAM_EVENT = {"text": "delta", "draft": "draft"}
+#: F008 limits on a clarification (design §4).
+MAX_QUESTIONS = 3
+MAX_OPTIONS = 4
+MAX_QUESTION_CHARS = 200
+_TRIMMED = "（问题较多，只列出前 3 个。）"
+
+
+def _is_yaml(info: str) -> bool:
+    return info.split()[:1] in (["yaml"], ["yml"])
+
+
+@dataclass
+class _Questions:
+    items: list[dict[str, Any]]
+    trimmed: bool
+
+
+def _questions(body: str) -> _Questions | None:
+    """A clarification block as the drawer's card takes it, or None when it is not one."""
+    try:
+        loaded = yaml.load(body, Loader=_AnswerLoader)
+    except (yaml.YAMLError, RecursionError):
+        return None
+    if not isinstance(loaded, list):
+        return None
+    items: list[dict[str, Any]] = []
+    trimmed = False
+    for raw in loaded:
+        if not isinstance(raw, dict) or not isinstance(raw.get("question"), str) or not raw["question"].strip():
+            continue
+        options: list[str] = []
+        for option in raw.get("options") or []:
+            text = str(option).strip()[:MAX_QUESTION_CHARS] if isinstance(option, (str, int, float)) else ""
+            if text and text not in options:
+                options.append(text)
+        if len(options) > MAX_OPTIONS:
+            options, trimmed = options[:MAX_OPTIONS], True
+        if len(options) < 2:
+            continue
+        items.append(
+            {
+                "id": str(raw.get("id") or "").strip()[:64],
+                "question": raw["question"].strip()[:MAX_QUESTION_CHARS],
+                "options": options,
+            }
+        )
+    if not items:
+        return None
+    if len(items) > MAX_QUESTIONS:
+        items, trimmed = items[:MAX_QUESTIONS], True
+    seen: set[str] = set()
+    for index, item in enumerate(items, start=1):
+        if not item["id"] or item["id"] in seen:
+            item["id"] = f"q{index}"
+        seen.add(item["id"])
+    return _Questions(items, trimmed)
+
+
+def questions_text(items: list[dict[str, Any]]) -> str:
+    """The questions as plain text: for a reply that also proposes, and for the history."""
+    return "\n".join(f"问：{q['question']}（选项：{' / '.join(q['options'])}）" for q in items)
+
+
+def _answer_parts(fence: _FenceFilter) -> tuple[str | None, _Questions | None, list[str]]:
+    """F008 design §4, in order: questions dressed as yaml are questions; a declaration
+    written inside an ask block is still a proposal; the proposal wins over the questions;
+    an ask block that does not parse is kept as text (returned in the third slot)."""
+    yaml_bodies: list[str] = []
+    ask_bodies: list[str] = []
+    for info, body in fence.blocks:
+        if _is_yaml(info):
+            (ask_bodies if _questions(body) is not None else yaml_bodies).append(body)
+        elif info.split()[:1] == ["ask"]:
+            ask_bodies.append(body)
+    block = yaml_bodies[0] if yaml_bodies else None
+    questions: _Questions | None = None
+    unparsed: list[str] = []
+    for body in ask_bodies:
+        parsed = _questions(body)
+        if parsed is not None:
+            questions = questions or parsed
+            continue
+        inner = _FenceFilter()
+        inner.feed(body)
+        inner.flush()
+        nested = inner.yaml_block()
+        if nested is not None:
+            block = block or nested
+        else:
+            unparsed.append(body.strip())
+    return block, questions, unparsed
+
+
 _BACKTICKS = re.compile(r"`{3,}")
 # What could still turn into a fence once the next chunk comes: indentation and backticks.
 _TRAILING_TICKS = re.compile(r" {0,3}`{0,2}\Z")
@@ -517,7 +624,8 @@ class _FenceFilter:
 
     def __init__(self) -> None:
         self._buffer = ""
-        # "text" | "info" (the opening fence's line) | "draft" (a yaml block) | "code" (any other)
+        # "text" | "info" (the opening fence's line) | "draft" (a yaml block) | "hidden" (an ask
+        # block, F008: kept for parsing, never streamed) | "code" (any other)
         self._state = "text"
         self._line_start = True  # whether the buffer starts at the start of a line
         self._open = 0  # the opening run's length while inside a block
@@ -528,7 +636,7 @@ class _FenceFilter:
 
     def yaml_block(self) -> str | None:
         """The first closed block tagged yaml / yml, as the model wrote it."""
-        return next((body for info, body in self.blocks if info.split()[:1] in (["yaml"], ["yml"])), None)
+        return next((body for info, body in self.blocks if _is_yaml(info)), None)
 
     def _indent_start(self, index: int) -> int | None:
         """Where the line holding ``index`` starts, if at most three spaces precede it there."""
@@ -541,9 +649,11 @@ class _FenceFilter:
     def _emit(self, pieces: list[tuple[str, str]], text: str) -> None:
         if not text:
             return
-        # Only a yaml block is a draft; any other block stays in the reply, fences and all.
-        pieces.append(("draft" if self._state == "draft" else "text", text))
-        if self._state == "draft":
+        # Only a yaml block is a draft; an ask block is kept but not streamed; any other block
+        # stays in the reply, fences and all.
+        if self._state != "hidden":
+            pieces.append(("draft" if self._state == "draft" else "text", text))
+        if self._state in ("draft", "hidden"):
             self._body += text
         self._line_start = text.endswith("\n")
 
@@ -574,14 +684,16 @@ class _FenceFilter:
 
     def _open_block(self, pieces: list[tuple[str, str]], line: str) -> None:
         self._info = line.strip().lower()
-        if self._info.split()[:1] in (["yaml"], ["yml"]):
+        if _is_yaml(self._info):
             self._state, self._line_start, self._body = "draft", True, ""
+        elif self._info.split()[:1] == ["ask"]:
+            self._state, self._line_start, self._body = "hidden", True, ""
         else:
             self._state = "code"
             self._emit(pieces, self._fence + line)
 
     def _close_block(self, pieces: list[tuple[str, str]], run: str) -> None:
-        if self._state == "draft":
+        if self._state in ("draft", "hidden"):
             self.blocks.append((self._info, self._body))
         else:
             self._emit(pieces, run)
@@ -618,13 +730,13 @@ class _FenceFilter:
         """
         pieces: list[tuple[str, str]] = []
         tail, self._buffer = self._buffer, ""
-        inside = self._state in ("draft", "code")
+        inside = self._state in ("draft", "hidden", "code")
         closing = re.fullmatch(r" {0,3}(`+)[ \t]*", tail) if inside and self._line_start else None
         if closing and len(closing.group(1)) >= self._open:
             self._close_block(pieces, tail)
         elif self._state != "info":
             self._emit(pieces, tail)
-            if self._state == "draft":
+            if self._state in ("draft", "hidden"):
                 self.blocks.append((self._info, self._body))
         return pieces
 
