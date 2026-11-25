@@ -150,3 +150,19 @@ async def test_stopping_a_paused_session_does_not_need_the_original_worker(dialo
     assert _keys(h, ":pause_meta") == []
     status = h.cache.get(f"workflow:{unique_id}:status")
     assert status["status"] == "FAILED"
+
+
+async def test_the_warm_in_memory_copy_is_not_resumable_after_the_retention_period(dialogue):
+    """The Worker that still holds the run must not keep a session alive past its retention period."""
+    h = dialogue
+    async with Socket(h.app) as socket:
+        prompt = await initialize(socket)
+        for key in _keys(h, ":pause_meta"):
+            value = h.cache.get(key)
+            value["expires_at"] = 1.0
+            h.cache.set(key, value)
+        await socket.send(answer(prompt))  # the object is still in this process
+        frames = await socket.until("processing", "close")
+    errors = [f for f in frames if f["category"] == "error"]
+    assert errors and errors[-1]["message"]["status_code"] == 10544
+    assert h.model.invoke.call_count == 0

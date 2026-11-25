@@ -347,7 +347,10 @@ def _continue_workflow(unique_id: str, workflow_id: str, chat_id: str, user_id: 
     holds_resume_token = False
     try:
         workflow = _global_workflow.get(redis_callback.unique_id, None)
-        if not workflow:
+        if workflow:
+            # the warm copy must not outlive the retention period either
+            _pause_store().ensure_not_expired(redis_callback.unique_id)
+        else:
             workflow, holds_resume_token = _restore_paused_workflow(redis_callback, workflow_id, chat_id, user_id)
             if workflow is None:
                 return

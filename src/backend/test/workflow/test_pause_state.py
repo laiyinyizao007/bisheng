@@ -192,3 +192,19 @@ def test_save_surfaces_a_run_state_error_unchanged(env):
     s = PauseStateStore(Boom(), retention_seconds=RETENTION, clock=Clock())
     with pytest.raises(RunStateError):
         s.save("u1", tenant_id=7, workflow_id="wf1", canvas=CANVAS, run_state=RUN_STATE)
+
+
+def test_ensure_not_expired_passes_inside_the_retention_period_and_without_a_marker(env):
+    store, _, clock = env
+    store.ensure_not_expired("never-saved")  # old sessions have no marker
+    _save(store)
+    clock.now += RETENTION - 1
+    store.ensure_not_expired("u1")
+
+
+def test_ensure_not_expired_raises_after_the_retention_period(env):
+    store, _, clock = env
+    _save(store)
+    clock.now += RETENTION + 1
+    with pytest.raises(WorkFlowPauseStateExpiredError):
+        store.ensure_not_expired("u1")

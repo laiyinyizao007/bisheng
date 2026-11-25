@@ -119,6 +119,14 @@ class PauseStateStore:
             expires_at=float(snapshot.get("expires_at") or 0),
         )
 
+    def ensure_not_expired(self, unique_id: str) -> None:
+        """Raise the expiry error if the session's retention period is over (a missing marker is fine)."""
+        meta = self.redis.get(_meta_key(unique_id))
+        expires_at = meta.get("expires_at") if isinstance(meta, dict) else None
+        if isinstance(expires_at, (int, float)) and self.clock() > expires_at:
+            logger.info("workflow pause state expired unique_id={}", unique_id)
+            raise WorkFlowPauseStateExpiredError()
+
     def delete(self, unique_id: str) -> None:
         for key in (_snapshot_key(unique_id), _meta_key(unique_id)):
             self.redis.delete(key)
