@@ -21,7 +21,6 @@ from typing import Any, Callable
 from loguru import logger
 
 from bisheng.common.errcode.flow import (
-    WorkFlowPauseResumeConflictError,
     WorkFlowPauseStateExpiredError,
     WorkFlowPauseStateInvalidError,
 )
@@ -126,10 +125,6 @@ class PauseStateStore:
 
     def acquire_resume(self, unique_id: str) -> bool:
         return bool(self.redis.setNx(_lock_key(unique_id), 1, expiration=RESUME_LOCK_SECONDS))
-
-    def require_resume(self, unique_id: str) -> None:
-        if not self.acquire_resume(unique_id):
-            raise WorkFlowPauseResumeConflictError()
 
     def release_resume(self, unique_id: str) -> None:
         self.redis.delete(_lock_key(unique_id))

@@ -26,7 +26,7 @@
 | 工作流图由画布数据确定性构建 | `graph_engine.py:build_nodes` | 图结构不必持久化，重建即可 |
 | LangGraph 检查点为 `MemorySaver`，线程号固定为 `"1"`；依赖 `langgraph>=1.2,<2.0` | `graph_engine.py`、`pyproject.toml:43` | 可导出导入检查点，并用版本范围加兼容测试兜底 |
 | 多租户由 ContextVar 注入，Redis 键须带租户 | constitution C3 | 键名含租户号，续跑时校验 |
-| 新错误码在工作流模块段登记 | constitution C5 | 拟用 10544 至 10546（落地前核对占用） |
+| 新错误码在工作流模块段登记 | constitution C5 | 用 10544、10545（已核对未被占用） |
 | 日志不得输出暂停态内容 | spec AC-14 | 序列化与恢复代码只记长度与键名 |
 
 ---
@@ -67,7 +67,7 @@
 
 ### 决策 5：并发与幂等（AC-12）
 
-续跑前用 Redis 原子操作抢占“续跑令牌”（`SET NX` 带短过期）：抢到的执行，抢不到的立即返回 10546。成功续跑到下一个暂停点或结束后释放。
+对外的拒绝沿用现有机制：重复提交同一暂停点的输入，会被 `message_id` 校验以 10543 拒绝（现有测试 `test_looping_workflow_accepts_two_rounds_and_rejects_replayed_prompt` 已覆盖）。续跑任务内再用 Redis 原子操作（`SET NX` 带短过期）抢占“续跑令牌”，抢不到的任务只记日志并退出，不改变会话状态，避免两个续跑任务同时重建同一会话。成功续跑到下一个暂停点或结束后释放。
 
 ### 决策 6：停止（AC-10）
 
@@ -116,7 +116,7 @@ sequenceDiagram
 | `workflow/domain/services/pause_state.py`（新增） | 导出、序列化、导入、校验、清理；不依赖 Celery |
 | `workflow/graph/graph_engine.py` | 增加“导出运行状态”“导入运行状态”两个方法，内部状态不外泄到服务层 |
 | `worker/workflow/tasks.py` | `_judge_workflow_status` 在 INPUT 时调用导出；`_continue_workflow` 取不到对象时调用重建；`stop_workflow` 与结束路径清理快照 |
-| `common/errcode/flow.py` | 新增 10544 会话已过期、10545 暂停态无法还原、10546 续跑被并发拒绝 |
+| `common/errcode/flow.py` | 新增 10544 会话已过期、10545 暂停态无法还原 |
 
 ---
 
@@ -133,7 +133,7 @@ sequenceDiagram
 
 ## 6. 对外契约与依赖
 
-**对外**：续跑成功时与现状一致；过期返回 10544；无法还原返回 10545；并发拒绝返回 10546（开放 API 与 WebSocket 两处的错误表现保持一致）。新增配置项 `workflow.pause_retention_seconds`。
+**对外**：续跑成功时与现状一致；过期返回 10544；无法还原返回 10545；重复输入沿用 10543（开放 API 与 WebSocket 两处的错误表现保持一致）。新增配置项 `workflow.pause_retention_seconds`。
 
 **依赖**：Redis（已有）；`langgraph>=1.2,<2.0` 的 `MemorySaver` 内部结构；`RedisCallback` 的画布数据与输入键。
 
@@ -164,4 +164,5 @@ sequenceDiagram
 |---|---|
 | 2026-11-25 | 初稿，待用户确认 |
 | 2026-11-25 | 实现偏差（细节级，不改决策）：键名沿用现有 `workflow:{unique_id}:…` 形式，租户号写在值里校验；新增标记键，过期提示窗口为保留期后一天，之后同一会话号等同于未知会话（与现状一致）。 |
+| 2026-11-25 | 实现偏差（细节级，不改决策）：不新增 10546；重复输入的对外拒绝沿用现有 10543，续跑令牌的败者静默退出；带步数计数的节点才导出计数（输出占位节点没有）。 |
 | 2026-11-25 | 实现偏差（细节级，不改决策）：检查点改为通过公共接口只导出最新一份，不读 `MemorySaver` 内部存储；新增模块 `workflow/graph/run_state.py`，引擎增加 `export_run_state`、`import_run_state`（见 tasks T002） |

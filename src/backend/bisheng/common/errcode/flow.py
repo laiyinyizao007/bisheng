@@ -95,11 +95,6 @@ class WorkFlowPauseStateInvalidError(BaseErrorCode):
     Msg: str = "The paused workflow session cannot be restored"
 
 
-class WorkFlowPauseResumeConflictError(BaseErrorCode):
-    Code: int = 10546
-    Msg: str = "The paused workflow session is already being continued"
-
-
 class AppWriteAuthError(BaseErrorCode):
     Code: int = 10599
     Msg: str = "No Apply Write Permission"

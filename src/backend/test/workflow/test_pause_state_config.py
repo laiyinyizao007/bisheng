@@ -3,7 +3,6 @@
 import pytest
 
 from bisheng.common.errcode.flow import (
-    WorkFlowPauseResumeConflictError,
     WorkFlowPauseStateExpiredError,
     WorkFlowPauseStateInvalidError,
 )
@@ -16,9 +15,8 @@ def test_the_new_error_codes_are_distinct_and_in_the_workflow_range():
     codes = {
         WorkFlowPauseStateExpiredError.Code,
         WorkFlowPauseStateInvalidError.Code,
-        WorkFlowPauseResumeConflictError.Code,
     }
-    assert codes == {10544, 10545, 10546}
+    assert codes == {10544, 10545}
 
 
 def test_retention_defaults_to_seven_days():

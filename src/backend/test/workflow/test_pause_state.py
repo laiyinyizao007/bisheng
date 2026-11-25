@@ -3,7 +3,6 @@
 import pytest
 
 from bisheng.common.errcode.flow import (
-    WorkFlowPauseResumeConflictError,
     WorkFlowPauseStateExpiredError,
     WorkFlowPauseStateInvalidError,
 )
@@ -173,13 +172,6 @@ def test_resume_token_expires_by_itself(env):
     assert store.acquire_resume("u1") is True
     clock.now += pause_state.RESUME_LOCK_SECONDS + 1
     assert store.acquire_resume("u1") is True
-
-
-def test_require_resume_raises_the_conflict_error(env):
-    store, _, _ = env
-    store.require_resume("u1")
-    with pytest.raises(WorkFlowPauseResumeConflictError):
-        store.require_resume("u1")
 
 
 def test_redis_failure_is_not_reported_as_expiry(env):

@@ -89,7 +89,7 @@ async def test_input_after_the_retention_period_reports_expiry(dialogue):
         frames = await socket.until("processing", "close")
     errors = [f for f in frames if f["category"] == "error"]
     assert errors
-    assert "10544" in str(errors[-1]) or "expired" in str(errors[-1]).lower()
+    assert errors[-1]["message"]["status_code"] == 10544
     assert h.model.invoke.call_count == 0
     assert _keys(h, ":pause") == []
 
@@ -105,7 +105,7 @@ async def test_a_damaged_snapshot_fails_the_session_with_a_readable_error(dialog
         frames = await socket.until("processing", "close")
     errors = [f for f in frames if f["category"] == "error"]
     assert errors
-    assert "10545" in str(errors[-1]) or "cannot be restored" in str(errors[-1])
+    assert errors[-1]["message"]["status_code"] == 10545
     assert h.model.invoke.call_count == 0
 
 
@@ -124,3 +124,29 @@ async def test_a_looping_workflow_can_be_resumed_twice_across_restarts(dialogue)
         frames = await socket.until("input")
     assert not [f for f in frames if f["category"] == "error"]
     assert h.model.invoke.call_count == 2
+
+
+async def test_stopping_a_paused_session_does_not_need_the_original_worker(dialogue, monkeypatch):
+    """AC-10: the session is ended and its saved state removed even though no Worker holds the run."""
+    h = dialogue
+    async with Socket(h.app) as socket:
+        await initialize(socket)
+    pause_key = _keys(h, ":pause")[0]
+    unique_id = pause_key.split(":")[1]
+    _forget_the_paused_object()
+
+    tasks = import_worker_tasks()
+    import asyncio
+    from contextlib import contextmanager
+
+    @contextmanager
+    def scope(*_args, **_kwargs):
+        yield 101  # tenant resolution from the database is covered elsewhere
+
+    monkeypatch.setattr(tasks, "durable_workload_scope", scope)
+    await asyncio.to_thread(tasks.stop_workflow.run, unique_id, FID, CHAT, 11)
+
+    assert _keys(h, ":pause") == []
+    assert _keys(h, ":pause_meta") == []
+    status = h.cache.get(f"workflow:{unique_id}:status")
+    assert status["status"] == "FAILED"

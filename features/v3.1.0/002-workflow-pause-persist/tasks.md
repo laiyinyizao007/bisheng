@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-25 用户确认 |
 | test-cases.md | ✅ 已生成 | 16 条 |
 | tasks.md | ✅ 已拆解 | — |
-| 实现 | 🔄 进行中 | 3 / 9 完成 |
+| 实现 | 🔄 进行中 | 5 / 9 完成（T006 的进程内部分已完成） |
 
 ---
 
@@ -29,7 +29,7 @@
 
 - [x] **T001**: 错误码与配置
   **文件**: `src/backend/bisheng/common/errcode/flow.py`、`src/backend/bisheng/core/config/settings.py`
-  **逻辑**: 先核对 10544 至 10546 未被占用；新增 10544 会话已过期、10545 暂停态无法还原、10546 续跑被并发拒绝；`WorkflowConf` 新增 `pause_retention_seconds`（默认 604800，非法值回落默认，参照 `code_node_enabled` 的校验写法）。
+  **逻辑**: 先核对 10544 至 10546 未被占用；新增 10544 会话已过期、10545 暂停态无法还原；`WorkflowConf` 新增 `pause_retention_seconds`（默认 604800，非法值回落默认，参照 `code_node_enabled` 的校验写法）。
   **覆盖 AC**: AC-07、AC-08、AC-11、AC-12
   **依赖**: 无
 
@@ -47,13 +47,13 @@
   **覆盖 AC**: AC-01、AC-07、AC-08、AC-09、AC-11、AC-12、AC-13、AC-14
   **依赖**: T001、T002
 
-- [ ] **T004**: 暂停时保存、续跑时重建
+- [x] **T004**: 暂停时保存、续跑时重建
   **文件**: `src/backend/bisheng/worker/workflow/tasks.py`
   **逻辑**: `_judge_workflow_status` 在 INPUT 时调用保存，失败则置失败并给出原因；`_continue_workflow` 在内存字典缺失时读快照并用画布副本重建 `Workflow`（参数与首次一致，含 `redis_callback.workflow` 赋值），再导入状态；过期返回 10544，无法还原返回 10545，抢令牌失败返回 10546。
   **覆盖 AC**: AC-02、AC-05、AC-06、AC-08、AC-11、AC-12、AC-13
   **依赖**: T003
 
-- [ ] **T005**: 结束与停止时清理
+- [x] **T005**: 结束与停止时清理
   **文件**: `src/backend/bisheng/worker/workflow/tasks.py`
   **逻辑**: 成功、失败、停止路径删除快照；`stop_workflow` 在内存缺失时不重建，直接置失败并删除快照；过期清理时同时移出内存字典。
   **覆盖 AC**: AC-09、AC-10
@@ -94,3 +94,5 @@
 
 - T002 检查点导出改走公共接口并只存最新一份，不读 `MemorySaver` 内部结构 → design.md 修订历史 2026-11-25 第 2 条。
 - T003 键名沿用现有 `workflow:{unique_id}:…` 形式、租户号写在快照里校验；新增小标记键 `pause_meta`（保留期之外多留一天）使迟到的请求得到“已过期”而不是“找不到” → design.md 修订历史 2026-11-25 第 3 条。
+- T004 不新增错误码 10546；重复输入沿用 10543，续跑令牌败者静默退出 → design.md 决策 5 与修订历史。
+- T006 先用现有 `dialogue` 进程内测试台（真引擎、真节点、内存 Redis）完成：暂停保存、丢失对象后续跑、结束清理、旧会话、过期、损坏、循环两次、停止；含 Redis 的真实集成留给 T008。
