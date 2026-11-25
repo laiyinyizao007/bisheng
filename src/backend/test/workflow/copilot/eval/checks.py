@@ -34,21 +34,25 @@ def asked_by_card(one: Round) -> bool:
 
 
 def asked_and_proposed(rounds: list[Round]) -> bool:
-    """Round one asked and proposed at once — reported apart, never a hit."""
-    first = rounds[0]
-    return first.proposal and bool(first.questions or _QUESTION_MARK.search(first.text))
+    """Some round asked and proposed at once — reported apart, never a hit."""
+    return any(one.proposal and bool(one.questions or _QUESTION_MARK.search(one.text)) for one in rounds)
+
+
+def _asking_text(rounds: list[Round]) -> str:
+    """What was asked across the rounds, including a round that also proposed."""
+    return "\n".join(_asked_text(one) for one in rounds if one.questions or asked_any(one))
 
 
 def asked(topics: dict[str, list[str]], rounds: list[Round]) -> bool:
     """Design §6.3: round one proposed nothing, and the clarification rounds together hit every topic."""
     if not rounds or not asked_any(rounds[0]):
         return False
-    text = "\n".join(_asked_text(one) for one in rounds if asked_any(one))
+    text = _asking_text(rounds)
     return all(any(word in text for word in words) for words in topics.values())
 
 
 def topics_hit(topics: dict[str, list[str]], rounds: list[Round]) -> set[str]:
-    text = "\n".join(_asked_text(one) for one in rounds if asked_any(one))
+    text = _asking_text(rounds)
     return {topic for topic, words in topics.items() if any(word in text for word in words)}
 
 
@@ -124,6 +128,8 @@ def _rate(successes: int, total: int) -> dict[str, Any]:
 
 def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     """Per-group and overall rates; every denominator is the number of runs."""
+    not_run = sum(bool(r.get("not_run")) for r in runs)
+    runs = [r for r in runs if not r.get("not_run")]  # a spent budget is not a quality failure
     by_group: dict[str, list[dict[str, Any]]] = {}
     for run in runs:
         by_group.setdefault(run["group"], []).append(run)
@@ -143,15 +149,28 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
         asked_runs = [r for r in items if r.get("asked_any")]
         if asked_runs:
             entry["card_rate"] = _rate(sum(bool(r.get("card")) for r in asked_runs), len(asked_runs))
+        judge_errors = 0
         for key in ("walkthrough", "cannot_do", "assume"):
-            verdicts = [v for r in items for v in (r.get(key) or [])]
+            given = [v for r in items for v in (r.get(key) or [])]
+            judge_errors += sum(v == "ERROR" for v in given)
+            verdicts = [v for v in given if v != "ERROR"]  # a judge outage is not a model failure
             if verdicts:
                 entry[key] = _rate(sum(v == "PASS" for v in verdicts), len(verdicts))
+        if judge_errors:
+            entry["judge_errors"] = judge_errors
         if group == "cannot_do":
-            stated = [r for r in items if r.get("cannot_do")]
-            entry["stated_rate"] = _rate(sum(all(v == "PASS" for v in r["cannot_do"]) for r in stated), len(items))
+            entry["stated_rate"] = _rate(sum(_stated(r) for r in items), len(items))
         summary[group] = entry
+    if not_run:
+        summary["not_run"] = not_run
     return summary
+
+
+def _stated(run: dict[str, Any]) -> bool:
+    """Every listed capability judged PASS, in a run that finished."""
+    verdicts = run.get("cannot_do") or []
+    expected = run.get("cannot_do_expected", len(verdicts))
+    return not run.get("error") and bool(verdicts) and len(verdicts) == expected and all(v == "PASS" for v in verdicts)
 
 
 # ---- secrets never reach the results (design §6.5) ---------------------------------------------

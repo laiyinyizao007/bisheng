@@ -192,3 +192,43 @@ def test_disabled_cases_are_not_run_and_say_why() -> None:
     from test.workflow.copilot.eval.cases import disabled_cases
 
     assert "参数" in disabled_cases()["clear-calculator"]
+
+
+# ---- G8 round 1 (codex 35/50) on the evaluation -------------------------------------------------
+
+
+def test_mixed_turns_are_found_in_any_round_and_their_topics_still_count() -> None:
+    rounds = [
+        checks.Round(questions=["金额会不会是外币？"], text="", proposal=False),
+        checks.Round(questions=["审批怎么发起？"], text="先按邮件给一个方案。", proposal=True),
+    ]
+    assert checks.asked_and_proposed(rounds) is True
+    assert checks.topics_hit(TOPICS, rounds) == {"currency", "approval"}
+
+
+def test_runs_not_run_and_judge_errors_stay_out_of_the_rates() -> None:
+    runs = [
+        {
+            "group": "cannot_do",
+            "structure_ok": True,
+            "must_ok": True,
+            "cannot_do": ["PASS"],
+            "cannot_do_expected": 1,
+            "walkthrough": ["PASS", "ERROR"],
+        },
+        {
+            "group": "cannot_do",
+            "structure_ok": True,
+            "must_ok": True,
+            "cannot_do": ["PASS"],
+            "cannot_do_expected": 2,
+            "walkthrough": ["FAIL"],
+            "error": "boom",
+        },
+        {"group": "cannot_do", "not_run": True},
+    ]
+    summary = checks.summarize(runs)
+    entry = summary["cannot_do"]
+    assert entry["runs"] == 2 and summary["not_run"] == 1
+    assert entry["walkthrough"]["n"] == 2 and entry["judge_errors"] == 1  # ERROR left out, counted apart
+    assert entry["stated_rate"]["k"] == 1  # the run judged on only 1 of 2 capabilities is not a pass

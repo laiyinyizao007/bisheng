@@ -158,7 +158,7 @@ def test_the_call_budget_stops_the_run() -> None:
     budget = run_eval.Budget(1)
     platform = FakePlatform([ask("币种？"), propose()])
     record = run_eval.run_case(CASES["ask-reimburse"], api(platform), FakeJudge(), run_id="r1", index=0, budget=budget)
-    assert "budget" in record["error"] and len(platform.messages) == 1
+    assert record["not_run"] is True and len(platform.messages) == 1
 
 
 def test_judge_verdicts_are_recorded_with_reasons() -> None:
@@ -193,6 +193,15 @@ def test_flow_names_carry_the_run_id() -> None:
     finally:
         BishengApi.create_flow = original  # type: ignore[method-assign]
     assert names == ["eval-abc123-clear-qa-assistant-2"]
+
+
+def test_report_counts_runs_not_run(tmp_path) -> None:
+    runs = [
+        {"id": "x", "group": "clear", "not_run": True},
+        {"id": "y", "group": "clear", "structure_ok": True, "must_ok": True},
+    ]
+    text = run_eval.write_results(runs, tmp_path, label="unit", meta={})["md"].read_text(encoding="utf-8")
+    assert "未运行" in text and "1" in text
 
 
 def test_report_renders_rates_with_intervals(tmp_path) -> None:
@@ -240,3 +249,41 @@ def test_platform_switches_are_read_from_env() -> None:
             return super().handler(request)
 
     assert api(EnvPlatform([])).platform_switches() == {"code_node_enabled": True}
+
+
+def test_everything_model_written_is_scrubbed_before_it_is_recorded() -> None:
+    leaky = [
+        {"type": "message", "text": "ok"},
+        {
+            "type": "ask",
+            "questions": [{"id": "q1", "question": "Bearer abc.def", "options": ["api_key=sk-999999", "b"]}],
+        },
+        {"type": "done"},
+    ]
+    platform = FakePlatform([leaky, [{"type": "issues", "issues": ["token=sk-888888"]}, {"type": "done"}]])
+    record = run_eval.run_case(
+        CASES["ask-reimburse"], api(platform), FakeJudge(), run_id="r1", index=0, budget=run_eval.Budget(100)
+    )
+    dumped = json.dumps(record, ensure_ascii=False)
+    for leaked in ("abc.def", "sk-999999", "sk-888888"):
+        assert leaked not in dumped
+
+
+def test_a_spent_budget_marks_the_run_not_run() -> None:
+    platform = FakePlatform([propose()])
+    record = run_eval.run_case(
+        CASES["clear-qa-assistant"], api(platform), FakeJudge(), run_id="r1", index=0, budget=run_eval.Budget(0)
+    )
+    assert record["not_run"] is True and platform.messages == []
+
+
+def test_history_matches_the_drawer_format() -> None:
+    from test.workflow.copilot.eval.bisheng_api import Turn
+
+    turn = Turn(text="先确认。", questions=[{"id": "q1", "question": "外币？", "options": ["是", "否"]}])
+    assert turn.history_text() == "先确认。\nQ: 外币？ (options: 是 / 否)"
+
+
+def test_disabled_cases_are_listed_in_the_meta(tmp_path) -> None:
+    paths = run_eval.write_results([], tmp_path, label="unit", meta={"disabled": {"clear-calculator": "no params"}})
+    assert "clear-calculator" in paths["md"].read_text(encoding="utf-8")

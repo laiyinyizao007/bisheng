@@ -32,7 +32,7 @@ from bisheng_flow_dsl.decompile import decompile
 from bisheng_flow_dsl.dump import dump
 from test.workflow.copilot.eval import checks
 from test.workflow.copilot.eval.bisheng_api import BishengApi, Turn
-from test.workflow.copilot.eval.cases import HERE, load_cases, load_fixture
+from test.workflow.copilot.eval.cases import HERE, disabled_cases, load_cases, load_fixture
 from test.workflow.copilot.eval.judge import CALIBRATION, Judge
 
 RESULTS_DIR = HERE / "results"
@@ -152,6 +152,7 @@ def run_case(
         "declaration": None,
         "walkthrough": [],
         "cannot_do": [],
+        "cannot_do_expected": len(case["cannot_do"]),
         "assume": [],
         "judgements": [],
         "error": None,
@@ -181,9 +182,9 @@ def run_case(
                 {
                     "message": message,
                     "text": checks.scrub(turn.text[:_TEXT_CAP], hidden),
-                    "questions": turn.question_lines(),
+                    "questions": [checks.scrub(q, hidden) for q in turn.question_lines() or []] or None,
                     "proposal": turn.proposal is not None,
-                    "issues": turn.issues,
+                    "issues": [checks.scrub(i, hidden) for i in turn.issues] if turn.issues else None,
                     "error": checks.scrub(turn.error, hidden) if turn.error else None,
                     "reasoning_chars": turn.reasoning_chars,
                 }
@@ -203,7 +204,7 @@ def run_case(
         if final.proposal is not None:
             record["structure_ok"] = not final.issues and not final.error
             declared, declaration_text = _declaration(final.proposal, templates or [], tools or [], case["id"])
-            record["declaration"] = declaration_text[:20000]
+            record["declaration"] = checks.scrub(declaration_text[:20000], hidden)
             failed = [check for check in case["must"] if not checks.must_holds(check, declared)]
             record["must_failed"] = failed
             record["must_ok"] = not failed
@@ -236,6 +237,8 @@ def run_case(
         for point in case["assume"]:
             budget.take()
             record["assume"].append(judged("assume", point, judge.assume(final.text, point)))
+    except BudgetExceeded:
+        record["not_run"] = True  # the cap was reached: not a quality result either way
     except Exception as exc:  # one failing run must not stop the others
         record["error"] = checks.scrub(f"{type(exc).__name__}: {exc}", hidden)
     finally:
@@ -290,11 +293,15 @@ def write_results(runs: list[dict[str, Any]], out_dir: Path, *, label: str, meta
         lines += ["> **评判不可靠**：校准项未全部判对，语义类指标仅供参考。", ""]
     lines += ["## 汇总", "", "| 组 | 指标 | 结果 |", "|---|---|---|"]
     for group, entry in summary.items():
+        if not isinstance(entry, dict):
+            continue
         for key, value in entry.items():
             if isinstance(value, dict) and "rate" in value:
                 lines.append(f"| {group} | {names.get(key, key)} | {_pct(value)} |")
         if "mixed" in entry:
             lines.append(f"| {group} | 问了又出方案（不计命中） | {entry['mixed']} 次 |")
+    if summary.get("not_run"):
+        lines.append(f"| all | 未运行（调用上限已到） | {summary['not_run']} 次 |")
     lines += [
         "",
         "## 逐条",
@@ -388,6 +395,7 @@ def main(argv: list[str] | None = None) -> int:
         "default_model_id": model_id,
         "judge_model": judge_model,
         "platform": switches,
+        "disabled": disabled_cases(),
         "skipped": skipped,
         "judge_calibrated": calibrated,
         "model_calls": budget.used,

@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001 -- Chinese prompts, questions and report copy use full-width punctuation
 """F008 evaluation: the platform's HTTP routes the runner drives (design §6.5)."""
 
 from __future__ import annotations
@@ -27,11 +26,11 @@ class Turn:
     events: list[str] = field(default_factory=list)
 
     def question_lines(self) -> list[str] | None:
-        """Each question with its options, as the drawer's history text renders them."""
+        """Each question with its options, exactly as the drawer's ``historyText`` renders them."""
         if not self.questions:
             return None
         return [
-            f"问：{q.get('question', '')}（选项：{' / '.join(map(str, q.get('options') or []))}）"
+            f"Q: {q.get('question', '')} (options: {' / '.join(map(str, q.get('options') or []))})"
             for q in self.questions
         ]
 
