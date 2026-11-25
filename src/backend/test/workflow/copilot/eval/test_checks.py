@@ -232,3 +232,34 @@ def test_runs_not_run_and_judge_errors_stay_out_of_the_rates() -> None:
     assert entry["runs"] == 2 and summary["not_run"] == 1
     assert entry["walkthrough"]["n"] == 2 and entry["judge_errors"] == 1  # ERROR left out, counted apart
     assert entry["stated_rate"]["k"] == 1  # the run judged on only 1 of 2 capabilities is not a pass
+
+
+# ---- G8 round 2 (codex 41/50) -------------------------------------------------------------------
+
+
+def test_a_run_with_a_mixed_round_is_never_a_hit() -> None:
+    rounds = [
+        checks.Round(questions=["金额会不会是外币？"], text="", proposal=False),
+        checks.Round(questions=["审批怎么发起？"], text="先按邮件给一个方案。", proposal=True),
+    ]
+    assert checks.asked(TOPICS, rounds) is False
+
+
+def test_a_judge_error_on_cannot_do_leaves_the_run_out_of_the_stated_rate() -> None:
+    runs = [
+        {"group": "cannot_do", "cannot_do": ["ERROR"], "cannot_do_expected": 1},
+        {"group": "cannot_do", "cannot_do": ["PASS"], "cannot_do_expected": 1},
+    ]
+    assert checks.summarize(runs)["cannot_do"]["stated_rate"]["n"] == 1
+
+
+def test_groups_without_runs_report_no_rates() -> None:
+    summary = checks.summarize([{"group": "clear", "not_run": True}])
+    assert "all" not in summary or summary["all"]["runs"] == 0
+    assert all(
+        "rate" not in v
+        for entry in summary.values()
+        if isinstance(entry, dict)
+        for v in entry.values()
+        if isinstance(v, dict) and v.get("n") == 0
+    )

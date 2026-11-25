@@ -158,6 +158,7 @@ def run_case(
         "error": None,
     }
     flow_id = None
+    phase = {"judging": False}
     try:
         flow_id = api.create_flow(f"eval-{run_id}-{case['id']}-{index}")
         if case["canvas"] == "empty":
@@ -209,6 +210,8 @@ def run_case(
             record["must_failed"] = failed
             record["must_ok"] = not failed
 
+        phase["judging"] = True
+
         def judged(kind: str, item: str, verdict_reason: tuple[str, str]) -> str:
             verdict, reason = verdict_reason
             record["judgements"].append(
@@ -238,7 +241,10 @@ def run_case(
             budget.take()
             record["assume"].append(judged("assume", point, judge.assume(final.text, point)))
     except BudgetExceeded:
-        record["not_run"] = True  # the cap was reached: not a quality result either way
+        if phase["judging"]:
+            record["judge_incomplete"] = True  # the copilot result stands; some verdicts are missing
+        else:
+            record["not_run"] = True  # the cap was reached before the copilot finished
     except Exception as exc:  # one failing run must not stop the others
         record["error"] = checks.scrub(f"{type(exc).__name__}: {exc}", hidden)
     finally:
@@ -310,6 +316,11 @@ def write_results(runs: list[dict[str, Any]], out_dir: Path, *, label: str, meta
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for run in sorted(runs, key=lambda r: (r["group"], r["id"], r.get("index", 0))):
+        if run.get("not_run"):
+            lines.append(
+                f"| {run['id']} | {run['group']} | {run.get('index', 0)} | 未运行 | — | — | — | — | 调用上限已到 |"
+            )
+            continue
         lines.append(
             f"| {run['id']} | {run['group']} | {run.get('index', 0)} | {_mark(run.get('asked') or run.get('asked_any'))} | {_mark(run.get('structure_ok'))} "
             f"| {_mark(run.get('must_ok'))} | {'/'.join(run.get('walkthrough') or []) or '—'} | {'/'.join(run.get('cannot_do') or []) or '—'} "

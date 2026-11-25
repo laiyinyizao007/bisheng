@@ -287,3 +287,18 @@ def test_history_matches_the_drawer_format() -> None:
 def test_disabled_cases_are_listed_in_the_meta(tmp_path) -> None:
     paths = run_eval.write_results([], tmp_path, label="unit", meta={"disabled": {"clear-calculator": "no params"}})
     assert "clear-calculator" in paths["md"].read_text(encoding="utf-8")
+
+
+def test_a_budget_spent_while_judging_keeps_the_copilot_result() -> None:
+    platform = FakePlatform([ask("币种？", "审批？"), propose()])
+    record = run_eval.run_case(
+        CASES["ask-reimburse"], api(platform), FakeJudge(), run_id="r1", index=0, budget=run_eval.Budget(3)
+    )
+    assert not record.get("not_run") and record["structure_ok"] is True
+    assert record["judge_incomplete"] is True
+
+
+def test_report_marks_runs_not_run(tmp_path) -> None:
+    runs = [{"id": "x", "group": "clear", "index": 0, "not_run": True}]
+    text = run_eval.write_results(runs, tmp_path, label="unit", meta={})["md"].read_text(encoding="utf-8")
+    assert "| x | clear | 0 | 未运行" in text

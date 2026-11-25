@@ -45,7 +45,7 @@ def _asking_text(rounds: list[Round]) -> str:
 
 def asked(topics: dict[str, list[str]], rounds: list[Round]) -> bool:
     """Design §6.3: round one proposed nothing, and the clarification rounds together hit every topic."""
-    if not rounds or not asked_any(rounds[0]):
+    if not rounds or not asked_any(rounds[0]) or asked_and_proposed(rounds):
         return False
     text = _asking_text(rounds)
     return all(any(word in text for word in words) for words in topics.values())
@@ -136,6 +136,8 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
     for group, items in [*by_group.items(), ("all", runs)]:
         n = len(items)
+        if not n:
+            continue
         entry: dict[str, Any] = {
             "runs": n,
             "structure": _rate(sum(bool(r.get("structure_ok")) for r in items), n),
@@ -159,7 +161,8 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
         if judge_errors:
             entry["judge_errors"] = judge_errors
         if group == "cannot_do":
-            entry["stated_rate"] = _rate(sum(_stated(r) for r in items), len(items))
+            judged = [r for r in items if "ERROR" not in (r.get("cannot_do") or [])]
+            entry["stated_rate"] = _rate(sum(_stated(r) for r in judged), len(judged))
         summary[group] = entry
     if not_run:
         summary["not_run"] = not_run

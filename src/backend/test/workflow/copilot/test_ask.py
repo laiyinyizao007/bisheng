@@ -182,3 +182,12 @@ async def test_question_text_is_one_line(scripted_llm) -> None:
     (ask,) = of(await run(prepare()), "ask")
     question = ask["questions"][0]
     assert "\n" not in question["question"] and all("\n" not in o for o in question["options"])
+
+
+async def test_questions_next_to_a_nested_declaration_are_kept_as_text(scripted_llm) -> None:
+    # G8 round 2 (codex counter-example): an ask block holding questions and a nested yaml
+    # declaration — the declaration is the proposal, and the questions must not vanish.
+    scripted_llm(f"说明。\n```ask\n- {{question: 一？, options: [甲, 乙]}}\n```yaml\n{FULL_FLOW}```\n")
+    events = await run(prepare())
+    assert of(events, "proposal")
+    assert "一？" in of(events, "message")[0]["text"]

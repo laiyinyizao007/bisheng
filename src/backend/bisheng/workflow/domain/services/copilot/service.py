@@ -601,18 +601,19 @@ def _answer_parts(fence: _FenceFilter) -> tuple[str | None, _Questions | None, l
     questions: _Questions | None = None
     unparsed: list[str] = []
     for body in ask_bodies:
-        parsed = _questions(body)
-        if parsed is not None:
-            questions = questions or parsed
-            continue
+        # Cut any nested declaration out first: it is a proposal candidate, and what is left
+        # of the body is still the clarification (G8 round 2: the questions must not vanish).
         inner = _FenceFilter()
-        inner.feed(body)
-        inner.flush()
+        rest = "".join(text for kind, text in [*inner.feed(body), *inner.flush()] if kind == "text")
         nested = inner.yaml_block()
         if nested is not None:
             block = block or nested
-        else:
-            unparsed.append(body.strip())
+        source = rest if nested is not None else body
+        parsed = _questions(source)
+        if parsed is not None:
+            questions = questions or parsed
+        elif source.strip():
+            unparsed.append(source.strip())
     return block, questions, unparsed
 
 
