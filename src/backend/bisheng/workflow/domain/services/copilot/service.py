@@ -90,6 +90,9 @@ MAX_REASONING_CHARS = 40_000
 #: is a failed turn, not a hang). F008: a reasoning model thinks for minutes while streaming,
 #: so a stream is cut off only when it stops producing anything — not after a fixed total.
 IDLE_TIMEOUT_SECONDS = 60.0
+#: The wait for a stream's first chunk: a provider that does not stream its thinking sends
+#: nothing until it is done thinking (G8, F008).
+FIRST_CHUNK_TIMEOUT_SECONDS = 180.0
 #: All attempts of one turn together; and the most a model stream's cleanup may take.
 TURN_TIMEOUT_SECONDS = 600.0
 CLOSE_TIMEOUT_SECONDS = 5.0
@@ -184,13 +187,15 @@ class WorkflowCopilotService:
                 # the scope guards only that await, never a ``yield``: a timeout scope left open
                 # across a yield would fire in the consumer's frame.
                 loop = asyncio.get_running_loop()
+                wait = FIRST_CHUNK_TIMEOUT_SECONDS
                 stream = llm.astream(_as_langchain(messages))
                 chunks = stream.__aiter__()
                 try:
                     while True:
                         try:
-                            async with asyncio.timeout_at(min(loop.time() + IDLE_TIMEOUT_SECONDS, turn_deadline)):
+                            async with asyncio.timeout_at(min(loop.time() + wait, turn_deadline)):
                                 chunk = await chunks.__anext__()
+                            wait = IDLE_TIMEOUT_SECONDS
                         except StopAsyncIteration:
                             break
                         # Reasoning models (MiniMax-M3: ~1 minute of it before the first word of
@@ -247,6 +252,8 @@ class WorkflowCopilotService:
                 # The reply and the block come from the same split the stream showed.
                 reply = _tidy(shown)
                 block, questions, unparsed = _answer_parts(fence)
+                if unparsed:
+                    reply = _tidy(reply + "\n\n" + "\n\n".join(unparsed))
                 if questions is not None:
                     reply = _tidy(reply + ("\n\n" + _TRIMMED if questions.trimmed else ""))
                 if block is None and questions is not None:
@@ -255,8 +262,6 @@ class WorkflowCopilotService:
                     yield {"type": "message", "text": reply}
                     yield {"type": "ask", "questions": questions.items}
                     return
-                if unparsed:
-                    reply = _tidy(reply + "\n\n" + "\n\n".join(unparsed))
                 if questions is not None:  # a proposal came too: it wins, the questions become text
                     reply = _tidy(reply + "\n\n" + questions_text(questions.items))
                 if block is None and attempt == 1:
@@ -541,17 +546,15 @@ def _questions(body: str) -> _Questions | None:
             continue
         options: list[str] = []
         for option in raw.get("options") or []:
-            text = str(option).strip()[:MAX_QUESTION_CHARS] if isinstance(option, (str, int, float)) else ""
+            text = _one_line(str(option))[:MAX_QUESTION_CHARS] if isinstance(option, (str, int, float)) else ""
             if text and text not in options:
                 options.append(text)
-        if len(options) > MAX_OPTIONS:
-            options, trimmed = options[:MAX_OPTIONS], True
+        options = options[:MAX_OPTIONS]
         if len(options) < 2:
             continue
         items.append(
             {
-                "id": str(raw.get("id") or "").strip()[:64],
-                "question": raw["question"].strip()[:MAX_QUESTION_CHARS],
+                "question": _one_line(raw["question"])[:MAX_QUESTION_CHARS],
                 "options": options,
             }
         )
@@ -559,12 +562,23 @@ def _questions(body: str) -> _Questions | None:
         return None
     if len(items) > MAX_QUESTIONS:
         items, trimmed = items[:MAX_QUESTIONS], True
-    seen: set[str] = set()
-    for index, item in enumerate(items, start=1):
-        if not item["id"] or item["id"] in seen:
-            item["id"] = f"q{index}"
-        seen.add(item["id"])
-    return _Questions(items, trimmed)
+    # Ids are the server's: the drawer keys its state by them, so a model-chosen id
+    # (duplicated, or one like ``__proto__``) never reaches it (G8, F008).
+    return _Questions([{"id": f"q{index}", **item} for index, item in enumerate(items, start=1)], trimmed)
+
+
+def _one_line(text: str) -> str:
+    """Whitespace collapsed: model-written text must not forge extra history lines (G8, F008)."""
+    return " ".join(text.split())
+
+
+def _looks_like_questions(body: str) -> bool:
+    """A yaml block that is a list of ``question`` items — a clarification, valid or not."""
+    try:
+        loaded = yaml.load(body, Loader=_AnswerLoader)
+    except (yaml.YAMLError, RecursionError):
+        return False
+    return isinstance(loaded, list) and bool(loaded) and all(isinstance(i, dict) and "question" in i for i in loaded)
 
 
 def questions_text(items: list[dict[str, Any]]) -> str:
@@ -580,7 +594,7 @@ def _answer_parts(fence: _FenceFilter) -> tuple[str | None, _Questions | None, l
     ask_bodies: list[str] = []
     for info, body in fence.blocks:
         if _is_yaml(info):
-            (ask_bodies if _questions(body) is not None else yaml_bodies).append(body)
+            (ask_bodies if _looks_like_questions(body) else yaml_bodies).append(body)
         elif info.split()[:1] == ["ask"]:
             ask_bodies.append(body)
     block = yaml_bodies[0] if yaml_bodies else None
