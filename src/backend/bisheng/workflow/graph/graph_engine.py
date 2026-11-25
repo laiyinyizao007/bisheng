@@ -16,6 +16,7 @@ from bisheng.workflow.common.node import BaseNodeData, NodeType
 from bisheng.workflow.common.workflow import WorkflowStatus
 from bisheng.workflow.edges.edges import EdgeManage
 from bisheng.workflow.graph.graph_state import GraphState
+from bisheng.workflow.graph import run_state
 from bisheng.workflow.nodes.base import BaseNode
 from bisheng.workflow.nodes.node_manage import NodeFactory
 from bisheng.workflow.nodes.output.output_fake import OutputFakeNode
@@ -289,7 +290,8 @@ class GraphEngine:
         self.build_more_fan_in_node()
 
         # compile langgraph
-        self.graph = self.graph_builder.compile(checkpointer=MemorySaver(), interrupt_before=interrupt_nodes)
+        self._saver = MemorySaver()
+        self.graph = self.graph_builder.compile(checkpointer=self._saver, interrupt_before=interrupt_nodes)
         self.graph_config["recursion_limit"] = (
             max((len(nodes) - len(end_nodes) - 1) * self.max_steps, 1) + len(end_nodes) + 1
         )
@@ -425,6 +427,36 @@ class GraphEngine:
                     # output Node requires user input
                     self.status = WorkflowStatus.INPUT.value
                     return
+
+    def export_run_state(self) -> dict:
+        """Everything needed to continue this paused run in a freshly built engine (F002).
+
+        Raises ``RunStateError`` with a readable reason when something cannot be saved.
+        """
+        checkpoint = run_state.dump_checkpoint(self._saver, self.graph_config)
+        if checkpoint is None:
+            raise run_state.RunStateError("the workflow has no checkpoint to save")
+        return {
+            "format": run_state.FORMAT_VERSION,
+            "status": self.status,
+            "checkpoint": checkpoint,
+            "graph_state": run_state.dump_graph_state(self.graph_state),
+            "steps": {node_id: node.current_step for node_id, node in self.nodes_map.items()},
+        }
+
+    def import_run_state(self, data: dict) -> None:
+        """Restore a run state exported by ``export_run_state`` into this freshly built engine."""
+        if not isinstance(data, dict) or data.get("format") != run_state.FORMAT_VERSION:
+            raise run_state.RunStateError("the saved run state has an unsupported format")
+        steps = data.get("steps")
+        if not isinstance(steps, dict) or set(steps) != set(self.nodes_map):
+            raise run_state.RunStateError("the saved run state does not match the workflow definition")
+        run_state.load_checkpoint(self._saver, self.graph_config, data["checkpoint"])
+        run_state.load_graph_state(self.graph_state, data["graph_state"])
+        for node_id, count in steps.items():
+            self.nodes_map[node_id].current_step = count
+        self.status = data["status"]
+        self.reason = ""
 
     def stop(self):
         for _, node_instance in self.nodes_map.items():

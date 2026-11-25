@@ -13,7 +13,7 @@
 | design.md | ✅ 已评审 | 2026-11-25 用户确认 |
 | test-cases.md | ✅ 已生成 | 16 条 |
 | tasks.md | ✅ 已拆解 | — |
-| 实现 | 🔲 未开始 | 0 / 9 完成 |
+| 实现 | 🔄 进行中 | 2 / 9 完成 |
 
 ---
 
@@ -27,13 +27,13 @@
 
 ### Wave 1（无依赖）
 
-- [ ] **T001**: 错误码与配置
+- [x] **T001**: 错误码与配置
   **文件**: `src/backend/bisheng/common/errcode/flow.py`、`src/backend/bisheng/core/config/settings.py`
   **逻辑**: 先核对 10544 至 10546 未被占用；新增 10544 会话已过期、10545 暂停态无法还原、10546 续跑被并发拒绝；`WorkflowConf` 新增 `pause_retention_seconds`（默认 604800，非法值回落默认，参照 `code_node_enabled` 的校验写法）。
   **覆盖 AC**: AC-07、AC-08、AC-11、AC-12
   **依赖**: 无
 
-- [ ] **T002**: 引擎导出与导入运行状态（测试先行）
+- [x] **T002**: 引擎导出与导入运行状态（测试先行）
   **文件**: `src/backend/bisheng/workflow/graph/graph_engine.py`、`src/backend/test/workflow/test_graph_engine_state.py`
   **逻辑**: 增加 `export_run_state()` 与 `import_run_state()`：检查点存储、变量池、历史消息、各节点 `current_step`；序列化用 LangGraph 自带序列化器；对 `MemorySaver` 内部结构加断言测试。往返后 `get_state().next` 一致。
   **覆盖 AC**: AC-01、AC-03、AC-04
@@ -91,3 +91,5 @@
 ## 实际偏差记录
 
 （实现中填写；只留一行指针，论证写在 design.md。）
+
+- T002 检查点导出改走公共接口并只存最新一份，不读 `MemorySaver` 内部结构 → design.md 修订历史 2026-11-25 第 2 条。
