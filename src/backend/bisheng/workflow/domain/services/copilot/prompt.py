@@ -29,6 +29,11 @@ MAX_HISTORY_TURNS = 20
 #: The history's text in all, after assistant YAML is dropped (each turn is also capped by the request schema).
 MAX_HISTORY_CHARS = 60_000
 RESOURCES_HEADING = "## 你可以使用的资源（只写名称）"
+CAPABILITIES_HEADING = "# 平台能力边界"
+#: Tool names that read as "notify someone": the alternatives offered for approvals and alerts.
+_NOTIFY_WORDS = ("邮件", "飞书", "钉钉", "企业微信", "短信", "消息")
+#: Template parameters that are outputs, not inputs the tool takes.
+_OUTPUT_KEYS = frozenset({"output"})
 CODE_NODE_OFF = "本平台已关闭代码节点：不要使用 `code` 类型的节点；用户要求时，说明该能力已被平台关闭。"
 _ROLES = frozenset({"user", "assistant"})
 _YAML_BLOCK = re.compile(r"```ya?ml\b.*?```", re.DOTALL | re.IGNORECASE)
@@ -93,6 +98,7 @@ def build_messages(
         part
         for part in (
             PREFACE,
+            capabilities_section(catalogue, code_node_enabled=code_node_enabled),
             CODE_NODE_OFF if not code_node_enabled else "",
             "# 工作流声明技能文档\n\n" + skill_text(),
             _resources(catalogue),
@@ -123,6 +129,58 @@ def _history(history: list[dict[str, Any]]) -> list[dict[str, str]]:
     return turns
 
 
+def _tool_children(catalogue: Catalogue) -> list[dict[str, Any]]:
+    return [
+        child
+        for tool_type in catalogue.tools
+        for child in tool_type.get("children") or []
+        if isinstance(child, dict) and child.get("name")
+    ]
+
+
+def _tool_params(child: dict[str, Any]) -> list[str]:
+    """The parameter keys a tool takes, from its node template (F008: the model cannot guess them)."""
+    template = child.get("node_template") or {}
+    return [
+        str(param["key"])
+        for group in template.get("group_params") or []
+        for param in group.get("params") or []
+        if isinstance(param, dict) and param.get("key") and param["key"] not in _OUTPUT_KEYS
+    ]
+
+
+def _tool_entry(child: dict[str, Any]) -> str:
+    params = _tool_params(child)
+    return f"{child['name']}（参数：{'、'.join(params)}）" if params else str(child["name"])
+
+
+def capabilities_section(
+    catalogue: Catalogue, *, code_node_enabled: bool, templates: list[dict[str, Any]] | None = None
+) -> str:
+    """F008 AC-06/07: what the platform can and cannot do, from the live templates, switch and tools."""
+    from bisheng.workflow.common.node_templates import NODE_TEMPLATES
+
+    types = [str(t["type"]) for t in (templates if templates is not None else NODE_TEMPLATES) if t.get("type")]
+    available = [t for t in types if code_node_enabled or t != "code"]
+    if "tool" not in available:
+        available.append("tool")
+    notify = [
+        _tool_entry(child) for child in _tool_children(catalogue) if any(w in str(child["name"]) for w in _NOTIFY_WORDS)
+    ]
+    lines = [
+        CAPABILITIES_HEADING,
+        "",
+        f"- 平台的节点类型只有：{'、'.join(f'`{t}`' for t in available)}。"
+        + ("" if code_node_enabled else "代码节点（`code`）已关闭，不能使用。"),
+        f"- 当前可用、可用来通知或发消息的工具：{'、'.join(notify) or '（无）'}。",
+        "- 需求用到上面节点类型之外的能力（例如审批、定时触发、数据库读写、HTTP 请求，仅为举例）时：",
+        "  在方案说明的「做不到 / 替代」里写明哪部分做不到、为什么，并给出最接近的替代",
+        "  （优先用上面列出的工具；要接外部系统，需要先在平台「工具」里注册自定义工具）。",
+        "  不许不加说明地降级实现（例如把「发起审批」悄悄做成一句提示）。",
+    ]
+    return "\n".join(lines)
+
+
 def _resources(catalogue: Catalogue) -> str:
     def names(items: list[Any]) -> str:
         return "、".join(r.name for r in items) or "（无）"
@@ -135,6 +193,7 @@ def _resources(catalogue: Catalogue) -> str:
             f"- Agent 可用模型：{names(catalogue.agent_models)}",
             f"- 文档知识库：{names(catalogue.knowledge)}",
             f"- 问答知识库：{names(catalogue.qa_knowledge)}",
-            f"- 工具：{names(catalogue.tool_children())}",
+            f"- 工具（名称及其参数名，工具节点 `params` 只能用这些参数名）："
+            f"{'、'.join(_tool_entry(c) for c in _tool_children(catalogue)) or '（无）'}",
         ]
     )

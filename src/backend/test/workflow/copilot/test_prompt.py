@@ -117,3 +117,57 @@ def test_retry_feeds_back_the_issues_after_the_previous_answer() -> None:
     assert again[: len(first)] == first
     assert again[-2] == {"role": "assistant", "content": "上次的回答"}
     assert again[-1]["role"] == "user" and "节点 a 缺少用户提示词" in again[-1]["content"]
+
+
+# ---- F008: platform capability boundary and tool parameters (design §3) ---------------------
+
+
+def _catalogue_with(*children: dict) -> Catalogue:
+    base = catalogue()
+    return Catalogue(**{**base.__dict__, "tools": [{"id": 3, "name": "预置", "children": list(children)}]})
+
+
+def test_tools_are_listed_with_their_parameter_names() -> None:
+    from test.workflow.copilot.conftest import tool_child
+
+    system = build(
+        catalogue=_catalogue_with(
+            tool_child("计算器", "k1", ["expression"], 1),
+            tool_child("发送邮件", "k2", ["receiver", "subject", "content"], 2),
+        )
+    )[0]["content"]
+    section = system[system.index(prompt.RESOURCES_HEADING) :]
+    assert "计算器（参数：expression）" in section
+    assert "发送邮件（参数：receiver、subject、content）" in section
+
+
+def test_capabilities_list_the_node_types_the_platform_has() -> None:
+    section = prompt.capabilities_section(catalogue(), code_node_enabled=True)
+    for node_type in ("start", "input", "llm", "agent", "tool", "condition", "output", "end", "code"):
+        assert f"`{node_type}`" in section, node_type
+    assert "做不到" in section and "替代" in section
+
+
+def test_capabilities_follow_the_code_node_switch() -> None:
+    off = prompt.capabilities_section(catalogue(), code_node_enabled=False)
+    offered = off.split("只有：", 1)[1].split("。", 1)[0]  # the list of available types
+    assert "`code`" not in offered and "`llm`" in offered
+    assert "代码节点（`code`）已关闭" in off
+
+
+def test_capabilities_name_the_notification_tools_the_user_can_use() -> None:
+    from test.workflow.copilot.conftest import tool_child
+
+    with_mail = _catalogue_with(
+        tool_child("发送邮件", "k2", ["receiver"], 2), tool_child("计算器", "k1", ["expression"], 1)
+    )
+    section = prompt.capabilities_section(with_mail, code_node_enabled=False)
+    line = next(row for row in section.splitlines() if "通知" in row and "工具" in row)
+    assert "发送邮件" in line and "计算器" not in line
+    rows = prompt.capabilities_section(catalogue(), code_node_enabled=False).splitlines()
+    assert "（无）" in next(row for row in rows if "通知" in row and "工具" in row)
+
+
+def test_capabilities_come_before_the_skill_document() -> None:
+    system = build()[0]["content"]
+    assert system.index(prompt.CAPABILITIES_HEADING) < system.index("# 工作流声明技能文档")
