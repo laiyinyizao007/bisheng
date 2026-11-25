@@ -31,6 +31,7 @@ from bisheng.common.errcode.flow import (
 from bisheng.common.errcode.http_error import NotFoundError, UnAuthorizedError
 from bisheng.common.services import telemetry_service
 from bisheng.common.services.base import BaseService
+from bisheng.core.context.tenant import get_current_tenant_id
 from bisheng.core.database import get_sync_db_session
 from bisheng.core.logger import trace_id_var
 from bisheng.database.models.flow import Flow, FlowCreate, FlowDao, FlowRead, FlowStatus, FlowType
@@ -402,11 +403,15 @@ class FlowService(BaseService):
                 raise WorkflowNameExistsError.http_exception()
         flow.user_id = login_user.user_id
         db_flow = Flow.model_validate(flow)
-        # Defense-in-depth: Flow.tenant_id default is None and the framework's
-        # before_flush hook (bisheng.core.database.tenant_filter) auto-fills it
-        # from current_tenant_id. Keeping this explicit assignment so future
-        # callers without an HTTP middleware (CLI, scripts) still set it right.
-        db_flow.tenant_id = login_user.tenant_id
+        # The request's tenant, as the framework's before_flush hook would fill it:
+        # ``get_current_tenant_id()`` includes the F019 management view, and this is a
+        # management write (it must carry the expected tenant), so a super admin managing
+        # another tenant creates the workflow there. Stamping ``login_user.tenant_id``
+        # instead wrote it into the admin's own tenant, and the read-back after the commit
+        # (filtered by the managed tenant) failed with 500. Callers without an HTTP
+        # middleware (CLI, scripts) have no context and keep the user's own tenant.
+        context_tenant = get_current_tenant_id()
+        db_flow.tenant_id = context_tenant if context_tenant is not None else login_user.tenant_id
         db_flow.create_time = None
         db_flow.update_time = None
         db_flow.flow_type = FlowType.WORKFLOW.value
