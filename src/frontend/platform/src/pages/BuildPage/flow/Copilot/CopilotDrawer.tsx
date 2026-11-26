@@ -45,7 +45,8 @@ interface Props {
     open: boolean;
     flowId: string;
     getCanvas: () => CanvasState;
-    onApply: (canvas: { nodes: Node[]; edges: Edge[] }) => void;
+    /** ``layout``: the proposal adds nodes, so the editor re-lays the canvas out once it lands. */
+    onApply: (canvas: { nodes: Node[]; edges: Edge[] }, options: { layout: boolean }) => void;
     onClose: () => void;
 }
 
@@ -150,7 +151,10 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
             const proposal = turn.proposal;
             if (!proposal) return;
             const land = () => {
-                onApply({ nodes: proposal.canvas.nodes as Node[], edges: proposal.canvas.edges as Edge[] });
+                onApply(
+                    { nodes: proposal.canvas.nodes as Node[], edges: proposal.canvas.edges as Edge[] },
+                    { layout: proposal.diff.nodes_only_local.length > 0 },
+                );
                 update(turn.id, { outcome: "applied" });
             };
             const current = getCanvas();
