@@ -10,7 +10,7 @@ import { ConversationComposer, MessageBubble, useConversationScroll } from "@bis
 import { Button } from "@bisheng/ui";
 import type { Edge, Node, Viewport } from "@xyflow/react";
 import { Outlined } from "bisheng-icons";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { canvasDigest } from "./canvasDigest";
 import CopilotProgress, { type Attempt, type ProgressEnd } from "./CopilotProgress";
@@ -59,7 +59,8 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const [availability, setAvailability] = useState<Availability>({ state: "checking" });
-    useEffect(() => bindCopilotSession(flowId), [flowId]);
+    // Before paint: another workflow's drawer and turns must not show for a frame.
+    useLayoutEffect(() => bindCopilotSession(flowId), [flowId]);
     // Until the session is bound to this workflow, it may still hold another one's turns.
     const bound = useCopilotSession((state) => state.flowId === flowId);
     const storedTurns = useCopilotSession((state) => state.turns);

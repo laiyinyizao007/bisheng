@@ -127,7 +127,7 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
     const [showApiPage, setShowApiPage] = useState(false)
     // F007: the copilot drawer's open state lives in the copilot session, so it survives the
     // re-mount Save does (see Copilot/session.ts).
-    const copilotOpen = useCopilotSession(state => state.open)
+    const copilotOpen = useCopilotSession(state => state.open && state.flowId === (flow?.id ? String(flow.id) : ''))
     const layoutCanvas = useCallback((animate: boolean, fit = true) => {
         cancelLayout()
         const instance = instanceRef.current
