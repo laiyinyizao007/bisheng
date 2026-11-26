@@ -1,0 +1,228 @@
+{
+ "meta": {
+  "run_id": "e128ff",
+  "label": "baseline-web-reader",
+  "cases": 1,
+  "repeat": 3,
+  "runs": 3,
+  "default_model_id": 7,
+  "judge_model": "MiniMax-M3",
+  "platform": {
+   "code_node_enabled": true
+  },
+  "skipped": [],
+  "judge_calibrated": true,
+  "model_calls": 9,
+  "elapsed_s": 32,
+  "calibration": [
+   {
+    "sample": "500",
+    "expect": "金额等于 500 时走需要审批",
+    "wanted": "FAIL",
+    "verdict": "FAIL",
+    "reason": "工作流使用严格大于判断，金额等于 500 时走自动通过分支，与期望走需要审批分支不符。｜走查：1. start_1：起始节点，无输入值，走向 ask。2. ask：取得用户输入 500，作为 user_input，走向 gate。3. gate：比较左值 ask.user_input=500、右值 \"500\"，比较方式为 greater_than；500 不大于 500，结果为 false，因此不进入 approve 分支，走默认边通向 auto。4. need：被跳过，未输出“需要审批”。5. auto：输出“已自动通过”。"
+   },
+   {
+    "sample": "500",
+    "expect": "金额等于 500 时走需要审批",
+    "wanted": "PASS",
+    "verdict": "PASS",
+    "reason": "输入 500 满足大于或等于 \"500\" 的条件并进入 need，与期望一致。｜走查：1. start_1：取值 500，作为工作流起点，沿边进入 ask。\n2. ask：取得用户输入 500，赋给 ask.user_input，沿边进入 gate。\n3. gate：比较左值 ask.user_input=500、右值 \"500\"，比较方式为 greater_than_or_equal，结果为 true；命中 approve 分支，沿边进入 need，不进入 auto。\n4. need：输出“需要审批”；need 为终点，工作流结束。"
+   },
+   {
+    "sample": "86",
+    "expect": "金额 86 时输出已自动通过",
+    "wanted": "PASS",
+    "verdict": "PASS",
+    "reason": "金额 86 不大于 500，工作流沿默认分支输出“已自动通过”，符合期望。｜走查：1. start_1：起始节点，无输入值，沿边进入 ask。2. ask：接收输入 86，ask.user_input=\"86\"，沿边进入 gate。3. gate：比较左值 ask.user_input=\"86\"、右值 \"500\"，方式为 greater_than，结果为 false，因此不进入 approve 分支，沿默认边进入 auto。4. auto：输出“已自动通过”。"
+   }
+  ]
+ },
+ "summary": {
+  "clear": {
+   "runs": 3,
+   "structure": {
+    "n": 3,
+    "k": 3,
+    "rate": 1.0,
+    "ci95": [
+     0.438,
+     1.0
+    ]
+   },
+   "must": {
+    "n": 3,
+    "k": 3,
+    "rate": 1.0,
+    "ci95": [
+     0.438,
+     1.0
+    ]
+   },
+   "false_ask_rate": {
+    "n": 3,
+    "k": 0,
+    "rate": 0.0,
+    "ci95": [
+     0.0,
+     0.562
+    ]
+   },
+   "walkthrough": {
+    "n": 3,
+    "k": 3,
+    "rate": 1.0,
+    "ci95": [
+     0.438,
+     1.0
+    ]
+   }
+  },
+  "all": {
+   "runs": 3,
+   "structure": {
+    "n": 3,
+    "k": 3,
+    "rate": 1.0,
+    "ci95": [
+     0.438,
+     1.0
+    ]
+   },
+   "must": {
+    "n": 3,
+    "k": 3,
+    "rate": 1.0,
+    "ci95": [
+     0.438,
+     1.0
+    ]
+   },
+   "walkthrough": {
+    "n": 3,
+    "k": 3,
+    "rate": 1.0,
+    "ci95": [
+     0.438,
+     1.0
+    ]
+   }
+  }
+ },
+ "runs": [
+  {
+   "id": "clear-web-reader",
+   "group": "clear",
+   "index": 0,
+   "rounds": [
+    {
+     "message": "用户输入一个网址，用网页读取工具读取这个网页的内容，再让大模型总结成一段话输出，然后结束。",
+     "text": "我会新增一个“网址输入 → 网页读取 → 大模型总结 → 输出 → 结束”的完整流程，并保留当前工作流名称。",
+     "questions": null,
+     "proposal": true,
+     "issues": null,
+     "error": null,
+     "reasoning_chars": 2185
+    }
+   ],
+   "asked": false,
+   "asked_any": false,
+   "card": false,
+   "mixed": false,
+   "structure_ok": true,
+   "must_ok": true,
+   "must_failed": [],
+   "declaration": "name: clear-web-reader\nnodes:\n- id: ask_url\n  type: input\n  name: 输入网址\n  description: 等待用户输入目标网页地址\n  position:\n    x: 480.0\n    y: 0.0\n  params:\n    user_input_file: false\n- id: end_1\n  type: end\n  name: 结束\n  position:\n    x: 2400.0\n    y: 0.0\n- id: read_web\n  type: tool\n  tool: 网页读取\n  name: 读取网页\n  description: 使用网页读取工具获取网页内容\n  position:\n    x: 960.0\n    y: 0.0\n  params:\n    url: '{{#ask_url.user_input#}}'\n- id: show_result\n  type: output\n  name: 输出总结\n  description: 向用户展示网页内容总结\n  position:\n    x: 1920.0\n    y: 0.0\n  params:\n    message:\n      msg: '{{#summarize.output#}}'\n      files: []\n- id: start_1\n  type: start\n  name: 开始\n  description: 接收用户提交的网址\n  position:\n    x: 0.0\n    y: 0.0\n  params:\n    guide_word: 请输入需要总结的网页网址\n    guide_question:\n    - https://example.com\n- id: summarize\n  type: llm\n  name: 总结网页\n  description: 根据读取到的网页内容生成一段话总结\n  position:\n    x: 1440.0\n    y: 0.0\n  params:\n    model_id: 7\n    system_prompt: |\n      你是一名专业的网页内容总结助手。\n      请忠实依据提供的网页内容进行总结，不要虚构网页中不存在的信息。\n      输出应是一段连贯、自然、易读的中文总结，并保留重要的关键信息。\n    user_prompt: |\n      请阅读以下网页内容，并用一段话进行概括：\n\n      {{#read_web.output#}}\n    output_user: false\nedges:\n- from: start_1\n  to: ask_url\n- from: ask_url\n  to: read_web\n- from: read_web\n  to: summarize\n- from: summarize\n  to: show_result\n- from: show_result\n  to: end_1\n",
+   "walkthrough": [
+    "PASS"
+   ],
+   "cannot_do": [],
+   "assume": [],
+   "judgements": [
+    {
+     "kind": "walkthrough",
+     "item": "https://example.com/news/123",
+     "verdict": "PASS",
+     "reason": "声明中的连线完整覆盖网址输入、按该网址读取网页、基于读取结果生成总结、输出总结并结束的期望流程。｜走查：1. start_1（开始）：接收样例输入“https://example.com/news/123”，提示用户输入网址；沿边 start_1 → ask_url 前进。2. ask_url（输入网址）：取值为“https://example.com/news/123”；沿边 ask_url → read_web 前进。3. read_web（网页读取）：url 参数由模板“{{#ask_url.user_input#}}”解析为“https://example.com/news/123”，调用网页读取工具并将读取结果作为 output；沿边 read_web → summarize 前进。4. summarize（总结网页）：以 read_web.output 作为 user_prompt 中的网页内容，依据系统提示生成中文的一段话总结并写入 output；沿边 summarize → show_result 前进。5. show_result（输出总结）：message.msg 取“{{#summarize.output#}}”，即展示上述总结，files 为空；沿边 show_result → end_1 前进。6. end_1（结束）：收到总结输出后结束。全程无条件节点。"
+    }
+   ],
+   "error": null
+  },
+  {
+   "id": "clear-web-reader",
+   "group": "clear",
+   "index": 1,
+   "rounds": [
+    {
+     "message": "用户输入一个网址，用网页读取工具读取这个网页的内容，再让大模型总结成一段话输出，然后结束。",
+     "text": "我会新增“网址输入 → 网页读取 → 大模型总结 → 输出 → 结束”的完整流程，并使用「网页读取」工具和 MiniMax-M3 模型。",
+     "questions": null,
+     "proposal": true,
+     "issues": null,
+     "error": null,
+     "reasoning_chars": 3390
+    }
+   ],
+   "asked": false,
+   "asked_any": false,
+   "card": false,
+   "mixed": false,
+   "structure_ok": true,
+   "must_ok": true,
+   "must_failed": [],
+   "declaration": "name: clear-web-reader\nnodes:\n- id: ask_url\n  type: input\n  name: 输入网址\n  position:\n    x: 480.0\n    y: 0.0\n  params:\n    user_input_file: false\n- id: end_1\n  type: end\n  name: 结束\n  position:\n    x: 2400.0\n    y: 0.0\n- id: read_web\n  type: tool\n  tool: 网页读取\n  name: 读取网页\n  position:\n    x: 960.0\n    y: 0.0\n  params:\n    url: '{{#ask_url.user_input#}}'\n- id: show_summary\n  type: output\n  name: 输出总结\n  position:\n    x: 1920.0\n    y: 0.0\n  params:\n    message:\n      msg: '{{#summarize.output#}}'\n      files: []\n- id: start_1\n  type: start\n  name: 开始\n  position:\n    x: 0.0\n    y: 0.0\n- id: summarize\n  type: llm\n  name: 总结网页\n  position:\n    x: 1440.0\n    y: 0.0\n  params:\n    model_id: 7\n    temperature: 0.2\n    system_prompt: |\n      你是一名专业的网页内容总结助手。\n      请准确理解网页正文，提炼核心信息，并整理为一段连贯、清晰、自然的话。\n      不要编造网页中不存在的信息；如果网页内容不足，请明确说明。\n    user_prompt: |\n      请总结以下网页的内容：\n\n      网页地址：{{#ask_url.user_input#}}\n\n      网页正文：\n      {{#read_web.output#}}\n    output_user: false\nedges:\n- from: start_1\n  to: ask_url\n- from: ask_url\n  to: read_web\n- from: read_web\n  to: summarize\n- from: summarize\n  to: show_summary\n- from: show_summary\n  to: end_1\n",
+   "walkthrough": [
+    "PASS"
+   ],
+   "cannot_do": [],
+   "assume": [],
+   "judgements": [
+    {
+     "kind": "walkthrough",
+     "item": "https://example.com/news/123",
+     "verdict": "PASS",
+     "reason": "声明按样例网址依次执行网页读取、基于读取结果的大模型总结、总结输出和结束，符合期望。｜走查：1. start_1（开始）：无业务输入，作为流程入口，沿边进入 ask_url。\n2. ask_url（输入网址）：user_input_file=false，接收样例文本 https://example.com/news/123，因此 user_input=\"https://example.com/news/123\"；沿边进入 read_web。\n3. read_web（读取网页）：调用“网页读取”工具，url=\"https://example.com/news/123\"，工具返回值写入 read_web.output；具体网页正文未在声明中给出；沿边进入 summarize。\n4. summarize（总结网页）：以 model_id=7、temperature=0.2 运行；系统提示要求准确提炼网页核心信息并输出连贯自然的一段话且不得编造；用户提示中的网页地址为 https://example.com/news/123，网页正文取自 read_web.output；依据该读取结果生成总结并写入 summarize.output；沿边进入 show_summary。\n5. show_summary（输出总结）：message.msg=\"{{#summarize.output#}}\"，即输出 summarize 生成的总结，files=[]；沿边进入 end_1。\n6. end_1（结束）：收到总结输出后流程结束。全程为线性流程，没有条件节点或分支。"
+    }
+   ],
+   "error": null
+  },
+  {
+   "id": "clear-web-reader",
+   "group": "clear",
+   "index": 2,
+   "rounds": [
+    {
+     "message": "用户输入一个网址，用网页读取工具读取这个网页的内容，再让大模型总结成一段话输出，然后结束。",
+     "text": "我会将流程改为“输入网址 → 网页读取 → 大模型总结 → 输出 → 结束”，网页读取节点直接接收用户输入的网址。",
+     "questions": null,
+     "proposal": true,
+     "issues": null,
+     "error": null,
+     "reasoning_chars": 3528
+    }
+   ],
+   "asked": false,
+   "asked_any": false,
+   "card": false,
+   "mixed": false,
+   "structure_ok": true,
+   "must_ok": true,
+   "must_failed": [],
+   "declaration": "name: clear-web-reader\nnodes:\n- id: ask_url\n  type: input\n  name: 输入网址\n  position:\n    x: 480.0\n    y: 0.0\n  params:\n    user_input_file: false\n- id: end_1\n  type: end\n  name: 结束\n  position:\n    x: 2400.0\n    y: 0.0\n- id: result\n  type: output\n  name: 输出总结\n  position:\n    x: 1920.0\n    y: 0.0\n  params:\n    message:\n      msg: '{{#summarizer.output#}}'\n      files: []\n- id: start_1\n  type: start\n  name: 开始\n  position:\n    x: 0.0\n    y: 0.0\n  params:\n    guide_word: 请输入需要读取并总结的网页网址。\n    guide_question:\n    - https://example.com\n- id: summarizer\n  type: llm\n  name: 总结网页\n  position:\n    x: 1440.0\n    y: 0.0\n  params:\n    model_id: 7\n    user_prompt: |\n      请阅读以下网页内容，并用一段连贯、简洁的话总结其核心内容：\n      {{#web_reader.output#}}\n    output_user: false\n- id: web_reader\n  type: tool\n  tool: 网页读取\n  name: 读取网页\n  position:\n    x: 960.0\n    y: 0.0\n  params:\n    url: '{{#ask_url.user_input#}}'\nedges:\n- from: start_1\n  to: ask_url\n- from: ask_url\n  to: web_reader\n- from: web_reader\n  to: summarizer\n- from: summarizer\n  to: result\n- from: result\n  to: end_1\n",
+   "walkthrough": [
+    "PASS"
+   ],
+   "cannot_do": [],
+   "assume": [],
+   "judgements": [
+    {
+     "kind": "walkthrough",
+     "item": "https://example.com/news/123",
+     "verdict": "PASS",
+     "reason": "声明中的节点及连接会读取给定网址、基于读取结果生成一段总结、输出该总结并结束，完全符合期望。｜走查：1. start_1（开始）：无上游输入，显示引导语“请输入需要读取并总结的网页网址。”及引导问题“https://example.com”，随后无条件进入 ask_url。\n2. ask_url（输入网址）：取得样例输入，ask_url.user_input = “https://example.com/news/123”，随后无条件进入 web_reader。\n3. web_reader（读取网页）：将 url 参数渲染为“{{#ask_url.user_input#}}”，即“https://example.com/news/123”，由“网页读取”工具读取该网址，读取结果赋给 web_reader.output，随后无条件进入 summarizer。\n4. summarizer（总结网页）：使用 model_id 7，将 web_reader.output 代入提示词，要求基于网页内容生成一段连贯、简洁的核心内容总结，结果赋给 summarizer.output，随后无条件进入 result。\n5. result（输出总结）：message 渲染为“{{#summarizer.output#}}”，即输出大模型生成的总结，files 为空数组，随后无条件进入 end_1。\n6. end_1（结束）：流程结束，无后续节点。"
+    }
+   ],
+   "error": null
+  }
+ ]
+}

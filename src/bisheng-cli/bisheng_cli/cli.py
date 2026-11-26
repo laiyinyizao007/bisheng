@@ -194,8 +194,10 @@ def _add_flow(subparsers: argparse._SubParsersAction) -> list[argparse.ArgumentP
     `flow tool` carries register / list. No flag names another identity (AC-42):
     every write is made as the key's own resource owner.
     """
-    flow = subparsers.add_parser("flow", help="工作流即代码：编译 / 对比 / 推送 / 运行 YAML 声明的工作流，注册工具")
-    verbs = flow.add_subparsers(dest="flow_command", metavar="{compile,diff,push,run,tool}")
+    flow = subparsers.add_parser(
+        "flow", help="工作流即代码：编译 / 对比 / 推送 / 运行 / 导出 YAML 声明的工作流，注册工具"
+    )
+    verbs = flow.add_subparsers(dest="flow_command", metavar="{compile,diff,push,run,export,tool}")
     spec_help = "工作流声明文件（YAML）；工作流绑定记在它旁边的 .bisheng/flow.json"
     overlay_help = "Python 覆盖层：只能改已声明参数的取值、追加未声明的节点与连线"
 
@@ -250,6 +252,16 @@ def _add_flow(subparsers: argparse._SubParsersAction) -> list[argparse.ArgumentP
         help="等平台发来下一个事件的最长秒数（默认 240）",
     )
 
+    export = verbs.add_parser("export", help="把线上工作流导出成声明文件（声明表达不了的内容逐项列出）")
+    export.add_argument(
+        "spec", metavar="SPEC", help="要写出的声明文件（YAML）；工作流绑定记在它旁边的 .bisheng/flow.json"
+    )
+    export.add_argument(
+        "--flow-id", dest="flow_id", default=None, help="来源工作流 id（默认取 .bisheng/flow.json 的绑定）"
+    )
+    export.add_argument("--version-id", dest="version_id", default=None, help="导出这个历史版本（默认线上当前版本）")
+    export.add_argument("--force", action="store_true", help="声明文件已存在时覆盖它")
+
     tool = verbs.add_parser("tool", help="注册 / 列出工作流可引用的自定义工具")
     tool_verbs = tool.add_subparsers(dest="tool_command", metavar="{register,list}")
     register = tool_verbs.add_parser("register", help="按 OpenAPI 描述注册工具类型，报出各操作标识")
@@ -257,7 +269,7 @@ def _add_flow(subparsers: argparse._SubParsersAction) -> list[argparse.ArgumentP
     register.add_argument("--name", default=None, help="工具类型名（默认取 OpenAPI 的 info.title）")
     tool_list = tool_verbs.add_parser("list", help="列出可用的工具类型及其操作")
 
-    return [flow, compile_, diff, push, run, tool, register, tool_list]
+    return [flow, compile_, diff, push, run, export, tool, register, tool_list]
 
 
 def confirm(

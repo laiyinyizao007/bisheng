@@ -1,0 +1,26 @@
+id: ask-discount-boundary
+group: should_ask
+canvas: empty
+request: 做一个下单折扣计算：用户输入订单金额，金额到 1000 就打九折，输出应付金额。
+ask:
+  boundary:
+  - 等于
+  - 包含
+  - 含
+  - 达到
+  - 1000 整
+  - 大于等于
+  - ≥
+answers:
+  boundary: 等于 1000 也打九折
+must:
+- condition_op:
+  - greater_than_or_equal
+  right_value: '1000'
+cannot_do: []
+assume: []
+walkthrough:
+- input: '1000'
+  expect: 等于 1000，打九折，应付 900
+- input: '999'
+  expect: 不打折，应付 999

@@ -1498,10 +1498,7 @@
   },
   "src/pages/BuildPage/flow/Panne.tsx": {
     "no-console": {
-      "count": 2
-    },
-    "no-restricted-syntax": {
-      "count": 2
+      "count": 1
     },
     "react-hooks/exhaustive-deps": {
       "count": 5

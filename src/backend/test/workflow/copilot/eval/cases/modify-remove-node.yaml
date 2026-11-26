@@ -1,0 +1,14 @@
+id: modify-remove-node
+group: modify
+canvas: qa_with_summary
+request: 去掉中间的摘要节点，让回答直接输出。
+ask: {}
+answers: {}
+must:
+- node_type: llm
+  max: 1
+cannot_do: []
+assume: []
+walkthrough:
+- input: 介绍一下长城
+  expect: 大模型回答后直接输出，没有摘要步骤

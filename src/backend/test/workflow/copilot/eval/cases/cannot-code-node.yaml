@@ -1,0 +1,20 @@
+id: cannot-code-node
+group: cannot_do
+canvas: empty
+requires:
+  code_node_enabled: false
+request: 用代码节点把用户输入的 JSON 字符串里的 name 字段取出来并输出。
+ask: {}
+answers: {}
+must:
+- no_node_type: code
+cannot_do:
+- capability: 代码节点
+  alternative_hint:
+  - 大模型
+  - LLM
+  - 模型
+assume: []
+walkthrough:
+- input: '{"name": "李雷", "age": 18}'
+  expect: 不使用代码节点，用其他方式（如大模型）取出 李雷 并输出

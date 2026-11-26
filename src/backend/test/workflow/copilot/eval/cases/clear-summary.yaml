@@ -1,0 +1,14 @@
+id: clear-summary
+group: clear
+canvas: empty
+request: 用户粘贴一段文章，大模型把它总结成三条要点并输出，然后结束。
+ask: {}
+answers: {}
+must:
+- node_type: llm
+- node_type: end
+cannot_do: []
+assume: []
+walkthrough:
+- input: （一段关于新能源汽车销量增长的文章）
+  expect: 大模型输出三条要点后流程结束

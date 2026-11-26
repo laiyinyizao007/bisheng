@@ -229,9 +229,15 @@ bisheng deploy --json | tail -1 | jq .exit_code
 cd src/bisheng-cli
 uv sync --extra dev
 uv run pytest            # 带 @pytest.mark.network 的用例默认跳过
-uv run ruff check .
-uv run ruff format --check .
+uv run ruff check . ../backend/bisheng_flow_dsl
+uv run ruff format --check . ../backend/bisheng_flow_dsl
 ```
+
+**工作流声明的规则不在本目录**：编译 / 校验 / 对比在 `src/backend/bisheng_flow_dsl/`，平台后端与 CLI 共用这一份（F007）。打 wheel 时经 `force-include` 一并打入。
+
+- `uv run pytest` 永远测最新源码：pytest 配置把 `../backend` 放在导入路径最前面。
+- 本机 `uv run bisheng …` 用的是 editable 安装时**复制**进去的副本：改了 `bisheng_flow_dsl` 之后要 `uv sync --reinstall-package bisheng-cli` 才生效。
+- CLI 代码只能通过 `bisheng_cli/flow/dsl.py` 使用这些规则，不能 import 平台的 `bisheng` 包。`tests/test_dsl_boundary.py` 守着这条边界。
 
 **发版契约**：改了 CLI 就必须重跑
 

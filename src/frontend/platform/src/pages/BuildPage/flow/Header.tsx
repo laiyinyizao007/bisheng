@@ -22,11 +22,12 @@ import { importFlow } from "@/util/flowUtils";
 import { RadioGroup,Radio as RadioGroupItem,Tabs,Tag } from "@bisheng/ui";
 import { Filled, Outlined } from "bisheng-icons";
 import { cloneDeep } from "lodash-es";
-import { Shield,ShieldCheck } from "lucide-react";
+import { Shield,ShieldCheck,Sparkles } from "lucide-react";
 import { useContext,useEffect,useRef,useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation,useNavigate } from "react-router-dom";
 import CreateApp from "../CreateApp";
+import { onTestPanelOpenChange, setCopilotPanel } from "./Copilot/panels";
 import { ChatTest } from "./FlowChat/ChatTest";
 import useFlowStore from "./flowStore";
 import { useBeforeUnload } from "./hooks/useBeforeUnload";
@@ -38,7 +39,9 @@ const APP_HEADER_ACTIONS = [
     'unpublish',
     'manage_permission',
 ]
-const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFlow }) => {
+const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFlow, copilotOpen = false, onCopilotOpenChange = undefined }) => {
+    // F007: Panne owns the copilot drawer's state; without it (other hosts) the button just does nothing.
+    const setCopilotOpen = (open: boolean) => onCopilotOpenChange?.(open)
 
     const { dark } = useContext(darkContext);
     const testRef = useRef(null)
@@ -269,7 +272,10 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
             {canEdit ? <Tabs activeKey={tabType} onChange={value => {
                 setTabType(value);
                 onTabChange(value);
-                if (value === 'api') testRef.current.close();
+                if (value === 'api') {
+                    testRef.current.close();
+                    setCopilotOpen(false);
+                }
             }} items={[
                 { key: 'edit', label: t('processOrchestration') },
                 { key: 'api', label: t('externalRelease') },
@@ -277,6 +283,15 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
             {/* Right Section with Options */}
             <div className="header-right flex items-center gap-2">
                 <Notification />
+                <Button
+                    variant={copilotOpen ? "solid" : "outlined"}
+                    disabled={!canEdit}
+                    onClick={() => setCopilotPanel(!copilotOpen, () => testRef.current?.close(), setCopilotOpen)}
+                    color="default"
+                >
+                    <Sparkles className="size-3.5" />
+                    {t('copilot.entry')}
+                </Button>
                 <Button variant="outlined" disabled={!canEdit} onClick={handleUiRequest(handleRunClick)} color="default">
                     <Filled.PlayerPlay className="size-3.5" />
                     {t('run')}
@@ -391,7 +406,7 @@ const Header = ({ flow, nodes, onTabChange, preFlow, onPreFlowChange, onImportFl
                     </PopoverContent>
                 </Popover>
             </div>
-            <ChatTest ref={testRef} />
+            <ChatTest ref={testRef} onOpenChange={(open: boolean) => onTestPanelOpenChange(open, setCopilotOpen)} />
             {/* 修改应用弹窗 flow&assistant */}
             <CreateApp ref={updateAppModalRef} loca={loca} onSave={(base) => {
                 return onlineWorkflow({

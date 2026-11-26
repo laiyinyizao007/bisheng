@@ -57,7 +57,7 @@ from bisheng_cli.errors import (
     EXIT_WAIT_TIMEOUT,
     CliError,
 )
-from bisheng_cli.flow.compiler import resolve_tool
+from bisheng_cli.flow.dsl import resolve_tool
 from bisheng_cli.http import UPLOAD_READ_TIMEOUT, PlatformClient, parse_envelope
 
 TEMPLATES_PATH = "/api/v2/flow/node_templates"

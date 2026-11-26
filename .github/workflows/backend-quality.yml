@@ -5,7 +5,8 @@ name: Backend Quality
 #
 # Named files, not the whole suite: the full suite has never run in CI and its state
 # is unknown, and a gate that starts red guards nothing. The list is the F005
-# (workflow-as-code) suites plus the skill-pack suite F006 extended; grow it as
+# (workflow-as-code) suites, the skill-pack suite F006 extended and the F007 copilot
+# directory (every file in it, including the shared-rules check); grow it as
 # other suites are brought to green, never shrink it.
 #
 # The frontend `workflow.ts` is in the trigger paths on purpose:
@@ -62,3 +63,4 @@ jobs:
           test/open_api/test_workflow_invoke_failed_node.py
           test/open_api/test_openapi_schema_contract.py
           test/dev_toolkit/test_skill_packs.py
+          test/workflow/copilot

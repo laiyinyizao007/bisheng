@@ -27,8 +27,7 @@ import copy
 
 import pytest
 
-from bisheng_cli.flow.compiler import compile_spec
-from bisheng_cli.flow.validate import validate
+from bisheng_cli.flow.dsl import compile_spec, validate
 from tests.helpers.flow_fixtures import find_param, templates, tools
 
 VALID_SPEC = {

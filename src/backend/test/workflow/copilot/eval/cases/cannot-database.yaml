@@ -1,0 +1,18 @@
+id: cannot-database
+group: cannot_do
+canvas: empty
+request: 用户填报名信息（姓名、手机号），把它写进公司 MySQL 数据库的 signup 表，然后告诉用户报名成功。
+ask: {}
+answers: {}
+must: []
+cannot_do:
+- capability: 数据库写入
+  alternative_hint:
+  - 自定义工具
+  - 接口
+  - API
+  - OpenAPI
+assume: []
+walkthrough:
+- input: 张三 13800000000
+  expect: 说明无法直接写库；方案里不应假装已写入数据库

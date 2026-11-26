@@ -30,9 +30,9 @@ from typing import Any
 import pytest
 
 from bisheng_cli.commands.skills import DEFAULT_PACKS
-from bisheng_cli.flow import compiler, validate
-from bisheng_cli.flow.compiler import compile_spec
+from bisheng_cli.flow.dsl import compile_spec
 from bisheng_cli.flow.spec import load_spec
+from bisheng_flow_dsl import compiler, validate
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACK_DIR = REPO_ROOT / "src/backend/bisheng/dev_toolkit/skills/workflow-as-code"

@@ -429,9 +429,9 @@ GET  /api/v2/tools                                        → 列出（含 node_
 | `tool/domain/services/tool.py` | `parse_openapi_schema`（OpenAPI → 工具类型）、`tool_key` 生成 | 不被本 feature 修改 |
 | **CLI** `bisheng_cli/flow/spec.py`（**新增**） | YAML 加载（`SafeLoader` + `!include`）、声明树的数据形状 | 不做权限判定；不填默认值 |
 | **CLI** `bisheng_cli/flow/overlay.py`（**新增**） | 受限 Python 覆盖层：只覆盖已声明参数 / 只追加未声明节点与边 | 不能删改已声明结构 |
-| **CLI** `bisheng_cli/flow/compiler.py`（**新增**） | 声明树 → `{nodes, edges, viewport}` | 不发请求（除取模板与工具列表） |
-| **CLI** `bisheng_cli/flow/validate.py`（**新增**） | 编译期 12 条结构校验 | 不裁定业务语义 |
-| **CLI** `bisheng_cli/flow/diff.py`（**新增**） | 结构化差异算法 | 不做权限判定 |
+| **共享** `src/backend/bisheng_flow_dsl/compiler.py`（F005 新增于 CLI，F007 移入中立包；CLI 经 `bisheng_cli/flow/dsl.py` 调用） | 声明树 → `{nodes, edges, viewport}` | 不发请求（除取模板与工具列表） |
+| **共享** `src/backend/bisheng_flow_dsl/validate.py`（同上） | 编译期 12 条结构校验 | 不裁定业务语义 |
+| **共享** `src/backend/bisheng_flow_dsl/diff.py`（同上） | 结构化差异算法 | 不做权限判定 |
 | **CLI** `bisheng_cli/flow/client.py`（**新增**） | v2 调用封装（模板、工具、版本读写、activate、invoke） | 不解析凭据（用 `credentials.py`） |
 | **CLI** `bisheng_cli/commands/flow.py`（**新增**） | `flow` 子命令族分发（compile / diff / push / run / tool） | 不含算法 |
 | **前端** `controllers/API/workflow.ts` | `getWorkflowNodeTemplate()` 改为请求后端 | 删除本地 `workflowTemplate` 字面量（约 890 行） |

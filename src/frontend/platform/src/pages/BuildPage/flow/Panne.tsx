@@ -5,7 +5,7 @@ import { copyReportTemplate } from "@/controllers/API/workflow";
 import { WorkFlow,WorkflowNode } from "@/types/flow";
 import { autoNodeName,calculatePosition,filterUselessFlow,initNode,useCopyPasteNode } from "@/util/flowUtils";
 import { useUndoRedo } from "@/util/hook";
-import { Background,BackgroundVariant,Connection,ReactFlow,addEdge,applyEdgeChanges,applyNodeChanges,useReactFlow } from '@xyflow/react';
+import { Background,BackgroundVariant,Connection,Edge,Node,ReactFlow,XYPosition,addEdge,applyEdgeChanges,applyNodeChanges,useReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/base.css';
 import '@xyflow/react/dist/style.css';
 import cloneDeep from "lodash-es/cloneDeep";
@@ -17,10 +17,17 @@ import FlowNode from "./FlowNode";
 import Header from "./Header";
 import NoteNode from "./NoteNode";
 import Sidebar from "./Sidebar";
+import CopilotDrawer from "./Copilot/CopilotDrawer";
+import { applyCanvas } from "./Copilot/panels";
+import { NODE_FOLD_EVENT, autoLayout, collapsed, readyToLayout, sizeKey, sizeSettler } from "./autoLayout";
+import { setCopilotOpen, useCopilotSession } from "./Copilot/session";
 import useFlowStore from "./flowStore";
 
 // 自定义组件
 const nodeTypes = { flowNode: FlowNode, noteNode: NoteNode };
+const LAYOUT_ANIMATION_MS = 400;
+/** Frames to wait for React Flow to measure freshly applied nodes before laying them out on estimates. */
+const LAYOUT_MEASURE_FRAMES = 30;
 // 流程编排面板
 export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: string }) {
     const [reactFlowInstance, setReactFlowInstance] = useState(null);
@@ -59,7 +66,6 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
      */
     useEffect(() => {
         if (reactFlowInstance && flow) {
-            console.log('数据更新 :>> ', reactFlowInstance.toObject());
             const { nodes, edges, viewport } = reactFlowInstance.toObject()
             flow.nodes = nodes
             flow.edges = edges
@@ -79,16 +85,39 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
         }
     };
 
+    // Auto layout (after arksusdemo's DAG editor): the toolbar button animates the nodes
+    // into place as its own undo step; an applied copilot canvas (folded) and a node folded
+    // or unfolded by hand are laid out once React Flow has re-measured the nodes (their
+    // real sizes are what keeps the columns apart).
+    // The pending animation frame: a new layout, an apply, a drag, undo / redo and
+    // leaving the editor all cancel it, so nothing overwrites positions after the fact.
+    const layoutFrame = useRef(0)
+    const cancelLayout = useCallback(() => cancelAnimationFrame(layoutFrame.current), [])
+    useEffect(() => cancelLayout, [cancelLayout])
+    useEffect(() => {
+        // Capture phase: runs before the undo hook's own document listener.
+        const onKey = (event: KeyboardEvent) => {
+            if ((event.ctrlKey || event.metaKey) && ['z', 'y'].includes(event.key.toLowerCase())) cancelLayout()
+        }
+        document.addEventListener('keydown', onKey, true)
+        return () => document.removeEventListener('keydown', onKey, true)
+    }, [cancelLayout])
+    // The editor remounts React Flow (key={flowKey}); a frame loop reads the live instance.
+    const instanceRef = useRef(reactFlowInstance)
+    instanceRef.current = reactFlowInstance
+
     const onNodeDragStart = useCallback(() => {
+        cancelLayout();
         // 👇 make dragging a node undoable
         takeSnapshot();
         // 👉 you can place your event handlers here
-    }, [takeSnapshot]);
+    }, [takeSnapshot, cancelLayout]);
 
     const onSelectionDragStart = useCallback(() => {
+        cancelLayout();
         // 👇 make dragging a selection undoable
         takeSnapshot();
-    }, [takeSnapshot]);
+    }, [takeSnapshot, cancelLayout]);
 
     const onEdgesDelete = useCallback(() => {
         // 👇 make deleting edges undoable
@@ -96,12 +125,91 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
     }, [takeSnapshot]);
 
     const [showApiPage, setShowApiPage] = useState(false)
+    // F007: the copilot drawer's open state lives in the copilot session, so it survives the
+    // re-mount Save does (see Copilot/session.ts).
+    const copilotOpen = useCopilotSession(state => state.open && state.flowId === (flow?.id ? String(flow.id) : ''))
+    const layoutCanvas = useCallback((animate: boolean, fit = true) => {
+        cancelLayout()
+        const instance = instanceRef.current
+        if (!instance) return
+        const from: Node[] = instance.getNodes()
+        const target = new Map<string, XYPosition>(autoLayout(from, instance.getEdges()).map(n => [n.id, n.position]))
+        const done = () => { if (fit) instanceRef.current?.fitView({ duration: 300 }) }
+        if (!animate) {
+            setNodes(nodes => nodes.map(n => target.has(n.id) ? { ...n, position: target.get(n.id) } : n))
+            layoutFrame.current = requestAnimationFrame(done)
+            return
+        }
+        const start = new Map<string, XYPosition>(from.map(n => [n.id, n.position]))
+        const began = performance.now()
+        const step = (now: number) => {
+            const t = Math.min((now - began) / LAYOUT_ANIMATION_MS, 1)
+            const ease = 1 - Math.pow(1 - t, 3)
+            setNodes(nodes => nodes.map(n => {
+                const a = start.get(n.id), b = target.get(n.id)
+                return a && b ? { ...n, position: { x: a.x + (b.x - a.x) * ease, y: a.y + (b.y - a.y) * ease } } : n
+            }))
+            if (t < 1) layoutFrame.current = requestAnimationFrame(step)
+            else done()
+        }
+        layoutFrame.current = requestAnimationFrame(step)
+    }, [setNodes, cancelLayout])
+    const handleAutoLayout = useCallback(() => {
+        if (!instanceRef.current) return
+        takeSnapshot()
+        layoutCanvas(true)
+    }, [takeSnapshot, layoutCanvas])
+    // Lay out once the sizes React Flow measures have settled (or on what it has after
+    // LAYOUT_MEASURE_FRAMES): ``before`` is the size key from just before the change.
+    const layoutWhenSettled = useCallback((before: string, ready: () => boolean, animate: boolean, fit: boolean) => {
+        const settled = sizeSettler(before)
+        let frames = 0
+        const tick = () => {
+            const shown: Node[] = instanceRef.current?.getNodes() ?? []
+            const done = ready() && settled(sizeKey(shown))
+            if (done || ++frames > LAYOUT_MEASURE_FRAMES) layoutCanvas(animate, fit)
+            else layoutFrame.current = requestAnimationFrame(tick)
+        }
+        layoutFrame.current = requestAnimationFrame(tick)
+    }, [layoutCanvas])
+    // The nodes a copilot proposal adds land folded (the ones already on the canvas keep the
+    // user's folds); a proposal that adds nodes is then laid out, inside the apply's undo step.
+    const applyCopilotCanvas = useCallback((canvas: { nodes: Node[]; edges: Edge[] }, options?: { layout?: boolean }) => {
+        cancelLayout() // an animation still running would move the new canvas's nodes
+        const shown: Node[] = instanceRef.current?.getNodes() ?? []
+        const before = sizeKey(shown)
+        const folded = { nodes: collapsed(canvas.nodes, new Set(shown.map(n => n.id))), edges: canvas.edges }
+        applyCanvas({ takeSnapshot, setNodes, setEdges }, folded)
+        if (!options?.layout) return
+        layoutWhenSettled(before, () => readyToLayout(instanceRef.current?.getNodes() ?? [], folded.nodes), false, true)
+    }, [takeSnapshot, setNodes, setEdges, layoutWhenSettled, cancelLayout])
+    // Folding or unfolding a node by hand re-lays the canvas out, animated, as its own
+    // undo step (the node fires the event before it flips its flag, so the snapshot holds
+    // the unfolded state and Ctrl+Z undoes the fold too); the view stays where it is.
+    useEffect(() => {
+        const onFold = () => {
+            if (!instanceRef.current) return
+            cancelLayout()
+            const before = sizeKey(instanceRef.current.getNodes())
+            takeSnapshot()
+            layoutWhenSettled(before, () => true, true, false)
+        }
+        window.addEventListener(NODE_FOLD_EVENT, onFold)
+        return () => window.removeEventListener(NODE_FOLD_EVENT, onFold)
+    }, [takeSnapshot, layoutWhenSettled, cancelLayout])
+    // The canvas as it is right now (unsaved edits included): what a copilot turn is based on.
+    const getCopilotCanvas = useCallback(() => {
+        const current = reactFlowInstance?.toObject()
+        return { nodes: current?.nodes ?? nodes, edges: current?.edges ?? edges, viewport: current?.viewport }
+    }, [reactFlowInstance, nodes, edges])
 
     return <div className="flex flex-col h-full overflow-hidden">
         <Header
             flow={flow}
             nodes={nodes}
             onTabChange={(type) => setShowApiPage('api' === type)}
+            copilotOpen={copilotOpen}
+            onCopilotOpenChange={setCopilotOpen}
             preFlow={preFlow}
             onImportFlow={(nodes, edges, viewport) => {
                 setNodes(nodes)
@@ -114,7 +222,7 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
                 setNodes(nodes)
             }}
         ></Header>
-        <div className={`flex-1 min-h-0 overflow-hidden ${showApiPage ? 'hidden' : ''} relative`}>
+        <div className={`flex flex-1 min-h-0 overflow-hidden ${showApiPage ? 'hidden' : ''} relative`}>
             <Sidebar onInitStartNode={node => {
                 // start node
                 const nodeId = `${node.type}_${generateUUID(5)}`;
@@ -172,7 +280,7 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
                             onNodeDragStart={onNodeDragStart} // 快照
                             onSelectionDragStart={onSelectionDragStart} // 快照
                             onNodesDelete={() => {
-                                console.log('【删除节点】');
+                                console.log('[nodes deleted]');
                                 takeSnapshot(flow)
                             }} // 更新setEdges
                             // 自定义线组件
@@ -190,11 +298,19 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
                             }}
                         >
                             <Background className="dark:bg-gray-950" color='#999' variant={BackgroundVariant.Dots} />
-                            <Controls position="bottom-left" onCreateNote={createNote}></Controls>
+                            <Controls position="bottom-left" onCreateNote={createNote} onAutoLayout={handleAutoLayout}></Controls>
                         </ReactFlow>
                     </div>
                 </div>
             </main>
+            {/* inside the canvas area, below the header, so the header buttons stay reachable */}
+            <CopilotDrawer
+                open={copilotOpen && !showApiPage}
+                flowId={flow?.id ? String(flow.id) : ''}
+                getCanvas={getCopilotCanvas}
+                onApply={applyCopilotCanvas}
+                onClose={() => setCopilotOpen(false)}
+            />
         </div>
         <div className={`flex flex-1 min-h-0 overflow-hidden ${showApiPage ? '' : 'hidden'}`}>
             <ApiMainPage type={'flow'} />

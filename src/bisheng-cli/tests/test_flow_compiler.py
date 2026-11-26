@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from bisheng_cli.errors import EXIT_LOCAL_INVALID, CliError
-from bisheng_cli.flow.compiler import compile_spec
+from bisheng_cli.flow.dsl import compile_spec
 from bisheng_cli.flow.spec import load_spec
 from tests.helpers.flow_fixtures import find_param, templates, tool_child, tools
 

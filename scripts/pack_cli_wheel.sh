@@ -72,6 +72,12 @@ case "${WHEEL_LISTING}" in
   *"bisheng_cli/main.py"*) ;;
   *) fail "${WHEEL_NAME} does not contain bisheng_cli/ — check [tool.hatch.build.targets.wheel] packages" ;;
 esac
+# F007: the workflow declaration rules live in src/backend/bisheng_flow_dsl/ and are
+# force-included. A wheel without them installs fine and dies on the first `flow` call.
+case "${WHEEL_LISTING}" in
+  *"bisheng_flow_dsl/__init__.py"*) ;;
+  *) fail "${WHEEL_NAME} does not contain bisheng_flow_dsl/ — check [tool.hatch.build.targets.wheel.force-include]" ;;
+esac
 case "${WHEEL_NAME}" in
   *"-${VERSION}-"*) ;;
   *) fail "wheel name ${WHEEL_NAME} does not carry version ${VERSION}" ;;

@@ -1,0 +1,30 @@
+name: 带摘要的问答
+nodes:
+  - id: start_1
+    type: start
+  - id: ask
+    type: input
+    name: 用户提问
+  - id: answer
+    type: llm
+    name: 回答
+    params:
+      model_id: __DEFAULT_MODEL__
+      user_prompt: "{{#ask.user_input#}}"
+  - id: summary
+    type: llm
+    name: 摘要
+    params:
+      model_id: __DEFAULT_MODEL__
+      user_prompt: "把下面的回答压缩成一句话：{{#answer.output#}}"
+  - id: reply
+    type: output
+    name: 输出
+    params:
+      message: {msg: "{{#summary.output#}}", files: []}
+edges:
+  - {from: start_1, to: ask}
+  - {from: ask, to: answer}
+  - {from: answer, to: summary}
+  - {from: summary, to: reply}
+  - {from: reply, to: ask}
