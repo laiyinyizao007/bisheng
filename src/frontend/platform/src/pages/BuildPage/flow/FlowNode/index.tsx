@@ -6,7 +6,7 @@ import { Card,CardContent } from '@/components/bs-ui/card';
 import { cname } from '@/components/bs-ui/utils';
 import { locationContext } from '@/contexts/locationContext';
 import { WorkflowNode } from '@/types/flow';
-import { Handle,NodeToolbar,Position } from '@xyflow/react';
+import { Handle,NodeToolbar,Position,useUpdateNodeInternals } from '@xyflow/react';
 import { Outlined } from "bisheng-icons";
 
 import { useCallback,useContext,useEffect,useMemo,useRef,useState } from 'react';
@@ -236,6 +236,10 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
     const [expend, setExpend] = useState(node.expand === undefined ? true : node.expand)
     const folded = !expend && foldable(node.type)
     const foldedRows = folded ? foldedBranches(node) : []
+    // Folding swaps which handles exist (body vs compact rows); React Flow re-reads handle
+    // bounds on its own only when the node's size changes, so tell it.
+    const updateNodeInternals = useUpdateNodeInternals()
+    useEffect(() => { updateNodeInternals(node.id) }, [folded, node.id, updateNodeInternals])
     // A canvas applied over this node (copilot lands folded) can change the flag under it.
     useEffect(() => { setExpend(node.expand === undefined ? true : node.expand) }, [node.expand])
 

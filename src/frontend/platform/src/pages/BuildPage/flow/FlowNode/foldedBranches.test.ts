@@ -52,6 +52,16 @@ describe("foldedBranches (the rows a folded node keeps, one per outgoing handle)
         expect(foldedBranches(output({ type: "input" }))).toEqual([]);
     });
 
+    it("a case or option without an id gets no row: its handle would fall back to the default one", () => {
+        expect(foldedBranches(condition([{ id: "", conditions: [] }, { conditions: [] }, { id: "c1" }]))).toEqual([
+            { kind: "if", handleId: "c1", operator: "and", terms: [] },
+            { kind: "else", handleId: "" },
+        ]);
+        expect(foldedBranches(output({ type: "choose" }, [{ label: "no id" }, { id: "o1", label: "ok" }]))).toEqual([
+            { kind: "option", handleId: "o1", text: "ok" },
+        ]);
+    });
+
     it("tolerates missing or malformed parameters", () => {
         expect(foldedBranches({ type: "condition", group_params: [] })).toEqual([{ kind: "else", handleId: "" }]);
         expect(foldedBranches(condition([{ id: "c1" }]))).toEqual([{ kind: "if", handleId: "c1", operator: "and", terms: [] }, { kind: "else", handleId: "" }]);

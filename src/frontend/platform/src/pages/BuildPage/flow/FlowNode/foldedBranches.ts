@@ -47,7 +47,9 @@ const record = (value: unknown): Record<string, unknown> => (value && typeof val
 export function foldedBranches(node: NodeLike): FoldedRow[] {
     if (node.type === "condition") {
         const cases = param(node, "condition")?.value;
-        const rows: FoldedRow[] = (Array.isArray(cases) ? cases : []).map((raw) => {
+        // A row without an id would render the default handle ("right_handle"), the else row's.
+        const withId = (Array.isArray(cases) ? cases : []).filter((raw) => text(record(raw).id));
+        const rows: FoldedRow[] = withId.map((raw) => {
             const item = record(raw);
             const conditions = Array.isArray(item.conditions) ? item.conditions : [];
             return {
@@ -70,7 +72,7 @@ export function foldedBranches(node: NodeLike): FoldedRow[] {
         const form = param(node, "output_form");
         if (record(form?.value).type !== "choose") return [];
         const options = Array.isArray(form?.options) ? form.options : [];
-        return options.map((raw) => {
+        return options.filter((raw) => text(record(raw).id)).map((raw) => {
             const option = record(raw);
             return { kind: "option" as const, handleId: text(option.id), text: text(option.label) };
         });
