@@ -7,7 +7,8 @@ import { Handle,Position } from '@xyflow/react';
 import { Outlined } from "bisheng-icons";
 import i18next from "i18next";
 import { GripVertical } from "lucide-react"; // 图标
-import { forwardRef,useEffect,useRef,useState } from 'react';
+import { forwardRef,useContext,useEffect,useRef,useState } from 'react';
+import { BodyFolded } from '../foldedBranches';
 import { DragDropContext,Draggable,Droppable } from '@hello-pangea/dnd';
 import { useTranslation } from 'react-i18next';
 
@@ -32,6 +33,7 @@ const itemNames = {
 }
 
 const DragOptions = forwardRef(({ edges = false, edit = false, scroll = false, options, onEditClick, onChange }: Iprops, ref) => {
+    const insideFoldedBody = useContext(BodyFolded); // folded: the node's compact rows carry the handles
     const { t } = useTranslation('flow'); // 使用国际化
     const [items, setItems] = useState([]); // 初始默认选项
     const [inputValue, setInputValue] = useState("");
@@ -138,7 +140,7 @@ const DragOptions = forwardRef(({ edges = false, edit = false, scroll = false, o
                                                     onChange={(text) => updateItems(items.map((e, i) => i === index ? { ...e, text } : e))} />
                                             </div>
                                             {
-                                                edges && <Handle
+                                                edges && !insideFoldedBody && <Handle
                                                     id={item.id}
                                                     type="source"
                                                     position={Position.Right}
