@@ -172,9 +172,14 @@ export function readyToLayout(current: Node[], applied: Node[]): boolean {
 /** Window event a node fires when the user folds or unfolds it: the editor re-lays the canvas out. */
 export const NODE_FOLD_EVENT = "bisheng:flow-node-fold";
 
-/** Every node folded (``data.expand = false``, the flag the node's fold toggle reads), as new objects. */
-export function collapsed<N extends Node>(nodes: N[]): N[] {
-    return nodes.map((node) => (node.type === NOTE_TYPE ? node : { ...node, data: { ...node.data, expand: false } }));
+/**
+ * The nodes not in ``existing`` folded (``data.expand = false``, the flag the node's fold
+ * toggle reads), as new objects; nodes already on the canvas keep whatever the user set.
+ */
+export function collapsed<N extends Node>(nodes: N[], existing: ReadonlySet<string>): N[] {
+    return nodes.map((node) =>
+        node.type === NOTE_TYPE || existing.has(node.id) ? node : { ...node, data: { ...node.data, expand: false } },
+    );
 }
 
 /** A key that changes whenever any node's measured size does. */
@@ -184,11 +189,11 @@ export function sizeKey(nodes: Node[]): string {
 
 /**
  * Fed one ``sizeKey`` per animation frame, says when to lay out: a fold or unfold is
- * re-measured a frame or two later, so with a ``before`` key it first waits for the sizes
- * to change; then it waits until they hold for one more frame.
+ * re-measured a frame or two later, so it first waits for the key to differ from
+ * ``before`` (taken just before the change); then it waits until it holds for one more frame.
  */
-export function sizeSettler(before: string | null): (key: string) => boolean {
-    let changed = before === null;
+export function sizeSettler(before: string): (key: string) => boolean {
+    let changed = false;
     let last: string | null = null;
     return (key) => {
         if (!changed) {

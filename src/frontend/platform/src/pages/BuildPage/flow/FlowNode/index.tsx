@@ -288,9 +288,10 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
                         {!['output', 'condition', 'end'].includes(node.type) && <div
                             className='absolute -right-1 -top-1 cursor-pointer p-2'
                             onClick={() => {
+                                // First: the editor snapshots for undo (still unfolded), then re-lays out.
+                                window.dispatchEvent(new Event(NODE_FOLD_EVENT))
                                 setExpend(!expend)
                                 node.expand = !expend
-                                window.dispatchEvent(new Event(NODE_FOLD_EVENT)) // the editor re-lays out
                             }}>
                             <Outlined.Down
                                 className={`bisheng-label ${expend && 'rotate-180'}`}

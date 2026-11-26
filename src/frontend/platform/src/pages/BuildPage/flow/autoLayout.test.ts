@@ -129,17 +129,24 @@ describe("autoLayout (layered, left to right)", () => {
     });
 });
 
-describe("collapsed (a copilot canvas lands with every node folded)", () => {
-    it("folds every node and leaves the input untouched", () => {
+describe("collapsed (the nodes a copilot proposal adds land folded)", () => {
+    const expand = (n: Node) => (n.data as { expand?: boolean }).expand;
+    it("folds the new nodes and leaves the input untouched", () => {
         const input = [node("a"), { ...node("b"), data: { type: "llm", expand: true } } as Node];
-        const out = collapsed(input);
-        expect(out.map((n) => (n.data as { expand?: boolean }).expand)).toEqual([false, false]);
-        expect((input[1].data as { expand?: boolean }).expand).toBe(true);
+        const out = collapsed(input, new Set());
+        expect(out.map(expand)).toEqual([false, false]);
+        expect(expand(input[1])).toBe(true);
         expect(out[0].data).not.toBe(input[0].data); // a new data object: the node component sees the change
+    });
+    it("keeps the nodes already on the canvas as they are (the user's folds stay)", () => {
+        const kept = { ...node("old"), data: { type: "llm", expand: true } } as Node;
+        const out = collapsed([kept, node("new")], new Set(["old"]));
+        expect(out[0]).toBe(kept);
+        expect(expand(out[1])).toBe(false);
     });
     it("leaves notes alone (they have no fold)", () => {
         const note = { ...node("n"), type: "noteNode" } as Node;
-        expect(collapsed([note])[0]).toBe(note);
+        expect(collapsed([note], new Set())[0]).toBe(note);
     });
 });
 
@@ -156,8 +163,9 @@ describe("sizeSettler (lay out once the new sizes have settled)", () => {
         expect(settled(small)).toBe(false); // changed, not yet steady
         expect(settled(small)).toBe(true);
     });
-    it("without a 'before': only waits for the sizes to hold", () => {
-        const settled = sizeSettler(null);
+    it("a size that flickers is not settled", () => {
+        const settled = sizeSettler(big);
+        expect(settled(small)).toBe(false);
         expect(settled(big)).toBe(false);
         expect(settled(small)).toBe(false);
         expect(settled(small)).toBe(true);

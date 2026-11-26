@@ -159,7 +159,7 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
     }, [takeSnapshot, layoutCanvas])
     // Lay out once the sizes React Flow measures have settled (or on what it has after
     // LAYOUT_MEASURE_FRAMES): ``before`` is the size key from just before the change.
-    const layoutWhenSettled = useCallback((before: string | null, ready: () => boolean, animate: boolean, fit: boolean) => {
+    const layoutWhenSettled = useCallback((before: string, ready: () => boolean, animate: boolean, fit: boolean) => {
         const settled = sizeSettler(before)
         let frames = 0
         const tick = () => {
@@ -170,17 +170,20 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
         }
         layoutFrame.current = requestAnimationFrame(tick)
     }, [layoutCanvas])
-    // A copilot canvas lands with every node folded and is then laid out, inside the
-    // apply's undo step (``options.layout`` is moot: folding changes the sizes anyway).
-    const applyCopilotCanvas = useCallback((canvas: { nodes: Node[]; edges: Edge[] }) => {
+    // The nodes a copilot proposal adds land folded (the ones already on the canvas keep the
+    // user's folds); a proposal that adds nodes is then laid out, inside the apply's undo step.
+    const applyCopilotCanvas = useCallback((canvas: { nodes: Node[]; edges: Edge[] }, options?: { layout?: boolean }) => {
         cancelLayout() // an animation still running would move the new canvas's nodes
-        const before = sizeKey(instanceRef.current?.getNodes() ?? [])
-        const folded = { nodes: collapsed(canvas.nodes), edges: canvas.edges }
+        const shown: Node[] = instanceRef.current?.getNodes() ?? []
+        const before = sizeKey(shown)
+        const folded = { nodes: collapsed(canvas.nodes, new Set(shown.map(n => n.id))), edges: canvas.edges }
         applyCanvas({ takeSnapshot, setNodes, setEdges }, folded)
+        if (!options?.layout) return
         layoutWhenSettled(before, () => readyToLayout(instanceRef.current?.getNodes() ?? [], folded.nodes), false, true)
     }, [takeSnapshot, setNodes, setEdges, layoutWhenSettled, cancelLayout])
     // Folding or unfolding a node by hand re-lays the canvas out, animated, as its own
-    // undo step; the view stays where the user is looking.
+    // undo step (the node fires the event before it flips its flag, so the snapshot holds
+    // the unfolded state and Ctrl+Z undoes the fold too); the view stays where it is.
     useEffect(() => {
         const onFold = () => {
             if (!instanceRef.current) return
