@@ -192,7 +192,8 @@ async def test_an_overlong_answer_is_cut_off_without_a_retry(scripted_llm, monke
 
 
 async def test_a_model_call_that_hangs_ends_as_a_timeout(scripted_llm, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(service_module, "MODEL_TIMEOUT_SECONDS", 0.05)
+    # A call that never yields is bounded by the first-chunk budget.
+    monkeypatch.setattr(service_module, "FIRST_CHUNK_TIMEOUT_SECONDS", 0.05)
     lines: list[str] = []
     sink = logger.add(lambda message: lines.append(str(message)), level="DEBUG")
     state = scripted_llm(answer(FULL_FLOW))
@@ -205,6 +206,27 @@ async def test_a_model_call_that_hangs_ends_as_a_timeout(scripted_llm, monkeypat
     assert error["code"] == 10563 and "TimeoutError" in error["message"]
     assert state["cancelled"]  # the hanging call itself was cancelled, not left running
     assert any("outcome=timeout" in line for line in lines)
+
+
+async def test_a_slow_but_steady_stream_is_not_cut_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    # F008: a reasoning model thinks for minutes while it streams; only silence is a timeout.
+    monkeypatch.setattr(service_module, "IDLE_TIMEOUT_SECONDS", 0.2)
+    text = answer(FULL_FLOW)
+
+    class Steady:
+        async def astream(self, messages):
+            for _ in range(10):  # 10 x 0.05 s of thinking: longer in total than the idle limit
+                await asyncio.sleep(0.05)
+                yield SimpleNamespace(content="", additional_kwargs={"reasoning_content": "想"})
+            for start in range(0, len(text), 50):
+                yield SimpleNamespace(content=text[start : start + 50])
+
+    async def factory(**kwargs):
+        return Steady()
+
+    monkeypatch.setattr(service_module.LLMService, "get_bisheng_llm", factory)
+    events = await asyncio.wait_for(run(prepare()), timeout=5)
+    assert of(events, "proposal") and not of(events, "error")
 
 
 # ---- what must stay on the canvas (AC-08, decision 4) ------------------------------------------
@@ -367,7 +389,7 @@ async def test_repeated_node_ids_are_fed_back_not_crashed(scripted_llm) -> None:
 
 
 async def test_the_whole_turn_has_a_deadline_across_attempts(scripted_llm, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(service_module, "MODEL_TIMEOUT_SECONDS", 60.0)
+    monkeypatch.setattr(service_module, "IDLE_TIMEOUT_SECONDS", 60.0)
     monkeypatch.setattr(service_module, "TURN_TIMEOUT_SECONDS", 0.05)
     state = scripted_llm(answer(FULL_FLOW))
     state["gate"] = asyncio.Event()
@@ -548,3 +570,23 @@ def test_a_fence_with_an_info_string_never_closes_a_block(size: int) -> None:
             text += piece if kind == "text" else ""
     assert fence.blocks == [("yaml", "z: 3\n")]
     assert "```text\n```yaml\n```" in text  # the text block, verbatim, in the reply
+
+
+async def test_the_first_chunk_gets_a_longer_budget_than_the_gaps(monkeypatch: pytest.MonkeyPatch) -> None:
+    # G8 (F008): a provider that streams nothing while it thinks must not die at the idle limit.
+    monkeypatch.setattr(service_module, "IDLE_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(service_module, "FIRST_CHUNK_TIMEOUT_SECONDS", 1.0)
+    text = answer(FULL_FLOW)
+
+    class SlowStart:
+        async def astream(self, messages):
+            await asyncio.sleep(0.2)  # longer than the idle limit, shorter than the first-chunk budget
+            for start in range(0, len(text), 50):
+                yield SimpleNamespace(content=text[start : start + 50])
+
+    async def factory(**kwargs):
+        return SlowStart()
+
+    monkeypatch.setattr(service_module.LLMService, "get_bisheng_llm", factory)
+    events = await asyncio.wait_for(run(prepare()), timeout=5)
+    assert of(events, "proposal") and not of(events, "error")

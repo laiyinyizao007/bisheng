@@ -65,6 +65,13 @@ export interface CopilotProposal {
     replaced: string[];
 }
 
+/** F008: one clarifying question the copilot asks before it proposes. */
+export interface CopilotQuestion {
+    id: string;
+    question: string;
+    options: string[];
+}
+
 export type CopilotEvent =
     | { type: "status"; stage: "generating" | "retrying" | "validating"; attempt: number }
     /** A reasoning model's thinking as it streams: shown only, never part of the reply. */
@@ -75,6 +82,8 @@ export type CopilotEvent =
     | { type: "message"; text: string }
     | ({ type: "proposal" } & CopilotProposal)
     | { type: "issues"; issues: string[] }
+    /** F008: the copilot asks first; the turn ends without a proposal. */
+    | { type: "ask"; questions: CopilotQuestion[] }
     | { type: "error"; code: number; message: string }
     | { type: "done" };
 

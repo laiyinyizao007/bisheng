@@ -1,0 +1,16 @@
+id: clear-translate-loop
+group: clear
+canvas: empty
+request: 用户输入一段中文，大模型翻译成英文后输出，然后回到输入继续翻译；用户输入“退出”时结束流程。
+ask: {}
+answers: {}
+must:
+- node_type: condition
+- node_type: end
+cannot_do: []
+assume: []
+walkthrough:
+- input: 退出
+  expect: 命中退出条件，走到结束节点，不调用翻译
+- input: 今天天气很好
+  expect: 翻译成英文输出，回到输入

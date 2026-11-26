@@ -1,0 +1,15 @@
+id: clear-qa-assistant
+group: clear
+canvas: empty
+request: 做一个问答助手：用户输入问题，大模型回答后输出答案，然后回到输入让用户继续问。
+ask: {}
+answers: {}
+must:
+- node_type: input
+- node_type: llm
+- node_type: output
+cannot_do: []
+assume: []
+walkthrough:
+- input: 什么是工作流？
+  expect: 大模型回答并输出，然后回到输入节点等待下一个问题

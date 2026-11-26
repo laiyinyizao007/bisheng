@@ -1,0 +1,31 @@
+id: ask-temperature-alert
+group: should_ask
+canvas: empty
+request: 做一个温度监控：用户输入当前温度，超过阈值就告警。
+ask:
+  threshold:
+  - 阈值
+  - 多少度
+  - 超过多少
+  - 温度上限
+  alert:
+  - 告警
+  - 通知
+  - 怎么
+  - 邮件
+  - 发给谁
+  - 方式
+answers:
+  threshold: 超过 37.5 摄氏度（不含）告警
+  alert: 发邮件到 ops@example.com，同时在对话里输出告警
+must:
+- node_type: tool
+  tool: 发送邮件
+- node_type: condition
+cannot_do: []
+assume: []
+walkthrough:
+- input: '38.2'
+  expect: 超过 37.5，发告警邮件并输出告警
+- input: '37.5'
+  expect: 等于 37.5 不告警

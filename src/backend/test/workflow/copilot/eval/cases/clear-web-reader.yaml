@@ -1,0 +1,15 @@
+id: clear-web-reader
+group: clear
+canvas: empty
+request: 用户输入一个网址，用网页读取工具读取这个网页的内容，再让大模型总结成一段话输出，然后结束。
+ask: {}
+answers: {}
+must:
+- node_type: tool
+  tool: 网页读取
+- node_type: llm
+cannot_do: []
+assume: []
+walkthrough:
+- input: https://example.com/news/123
+  expect: 网页读取工具读取该网址，大模型基于读取结果总结成一段话并输出，然后结束

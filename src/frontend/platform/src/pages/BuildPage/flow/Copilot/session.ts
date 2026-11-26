@@ -1,5 +1,6 @@
-import type { CopilotProposal } from "@/controllers/API/workflowCopilot";
+import type { CopilotProposal, CopilotQuestion } from "@/controllers/API/workflowCopilot";
 import { create } from "zustand";
+import type { AskState } from "./AskCard";
 import type { Attempt } from "./CopilotProgress";
 
 /**
@@ -21,6 +22,8 @@ export interface Turn {
     attempts?: Attempt[];
     running?: boolean;
     proposal?: CopilotProposal;
+    /** F008: questions asked before proposing, and what became of the card. */
+    ask?: { questions: CopilotQuestion[]; state: AskState; answers?: Record<string, string> };
     issues?: string[];
     error?: string;
     outcome?: Outcome;

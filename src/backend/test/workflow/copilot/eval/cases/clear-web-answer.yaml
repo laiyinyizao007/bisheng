@@ -1,0 +1,15 @@
+id: clear-web-answer
+group: clear
+canvas: empty
+request: 用户输入一个问题，先用联网搜索工具搜索，再让大模型根据搜索结果回答，输出答案后结束。
+ask: {}
+answers: {}
+must:
+- node_type: tool
+  tool: 联网搜索
+- node_type: llm
+cannot_do: []
+assume: []
+walkthrough:
+- input: 今年的诺贝尔物理学奖颁给了谁？
+  expect: 先搜索，再由大模型基于搜索结果回答并输出

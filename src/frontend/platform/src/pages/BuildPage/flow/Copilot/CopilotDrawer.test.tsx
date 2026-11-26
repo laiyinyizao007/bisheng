@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CopilotEvent, CopilotRequest } from "@/controllers/API/workflowCopilot";
 
@@ -447,6 +447,93 @@ describe("progress while generating (chat-style)", () => {
         await send("is regex a full match?");
         await waitFor(() => expect(screen.queryByTestId("copilot-progress")).toBeNull());
         expect(screen.getByText("Regex is a partial match.")).toBeInTheDocument();
+    });
+});
+
+describe("ask first (F008)", () => {
+    const QUESTIONS = [
+        { id: "currency", question: "Foreign currency?", options: ["RMB only", "Convert"] },
+        { id: "approval", question: "How to approve?", options: ["Notice only", "Email the lead"] },
+    ];
+    const askEvents = (): CopilotEvent[] => [
+        { type: "status", stage: "generating", attempt: 1 },
+        { type: "message", text: "Two things first." },
+        { type: "ask", questions: QUESTIONS },
+        { type: "done" },
+    ];
+
+    it("shows the questions as a card; continue is enabled only when every question is answered", async () => {
+        mocks.stream.mockImplementation(streamOf(askEvents()));
+        renderDrawer();
+        await send("make a reimbursement flow");
+        const card = await screen.findByTestId("copilot-ask");
+        const proceed = within(card).getByRole("button", { name: "Continue with these" });
+        expect(proceed).toBeDisabled();
+        fireEvent.click(within(card).getByRole("button", { name: "Convert" }));
+        expect(proceed).toBeDisabled();
+        fireEvent.click(within(card).getByRole("button", { name: "Email the lead" }));
+        expect(proceed).toBeEnabled();
+    });
+
+    it("submitting sends the answers as the next turn, with the questions in the history, and locks the card", async () => {
+        mocks.stream.mockImplementationOnce(streamOf(askEvents())).mockImplementation(streamOf(proposalEvents()));
+        renderDrawer();
+        await send("make a reimbursement flow");
+        const card = await screen.findByTestId("copilot-ask");
+        fireEvent.click(within(card).getByRole("button", { name: "Convert" }));
+        fireEvent.click(within(card).getByRole("button", { name: "Email the lead" }));
+        await act(async () => {
+            fireEvent.click(within(card).getByRole("button", { name: "Continue with these" }));
+        });
+        const [request] = mocks.stream.mock.calls[1] as [CopilotRequest, AbortSignal];
+        expect(request.message).toBe("Foreign currency?：Convert；How to approve?：Email the lead");
+        expect(request.history[1].content).toContain("Foreign currency?");
+        expect(request.history[1].content).toContain("RMB only / Convert");
+        const locked = await screen.findByTestId("copilot-ask-locked");
+        expect(locked).toHaveTextContent("Convert");
+        expect(within(locked).queryByRole("button")).toBeNull();
+    });
+
+    it("'other' needs text before it counts as an answer", async () => {
+        mocks.stream.mockImplementationOnce(streamOf(askEvents())).mockImplementation(streamOf(proposalEvents()));
+        renderDrawer();
+        await send("x");
+        const card = await screen.findByTestId("copilot-ask");
+        fireEvent.click(within(card).getAllByRole("button", { name: "Other" })[0]);
+        fireEvent.click(within(card).getByRole("button", { name: "Notice only" }));
+        const proceed = within(card).getByRole("button", { name: "Continue with these" });
+        expect(proceed).toBeDisabled();
+        fireEvent.change(within(card).getByRole("textbox"), { target: { value: "EUR at 7.8" } });
+        expect(proceed).toBeEnabled();
+        await act(async () => {
+            fireEvent.click(proceed);
+        });
+        const [request] = mocks.stream.mock.calls[1] as [CopilotRequest, AbortSignal];
+        expect(request.message).toContain("Foreign currency?：EUR at 7.8");
+    });
+
+    it("a double click on continue sends once", async () => {
+        mocks.stream.mockImplementationOnce(streamOf(askEvents())).mockImplementation(streamOf(proposalEvents()));
+        renderDrawer();
+        await send("x");
+        const card = await screen.findByTestId("copilot-ask");
+        fireEvent.click(within(card).getByRole("button", { name: "Convert" }));
+        fireEvent.click(within(card).getByRole("button", { name: "Email the lead" }));
+        const proceed = within(card).getByRole("button", { name: "Continue with these" });
+        await act(async () => {
+            fireEvent.click(proceed);
+            fireEvent.click(proceed);
+        });
+        expect(mocks.stream).toHaveBeenCalledTimes(2); // the first request and one answer
+    });
+
+    it("typing a new message instead locks the card as not answered", async () => {
+        mocks.stream.mockImplementationOnce(streamOf(askEvents())).mockImplementation(streamOf(proposalEvents()));
+        renderDrawer();
+        await send("x");
+        await screen.findByTestId("copilot-ask");
+        await send("just assume RMB");
+        expect(await screen.findByTestId("copilot-ask-locked")).toHaveTextContent("Not answered");
     });
 });
 

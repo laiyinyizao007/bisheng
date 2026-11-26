@@ -1,0 +1,25 @@
+id: ask-notify-channel
+group: should_ask
+canvas: empty
+request: 客户在对话里提交投诉内容后，自动通知客服主管，并告诉客户“已转交主管处理”。
+ask:
+  channel:
+  - 邮件
+  - 飞书
+  - 钉钉
+  - 企业微信
+  - 怎么通知
+  - 渠道
+  - 方式
+  - 发给谁
+answers:
+  channel: 发邮件给主管 lead@example.com
+must:
+- node_type: tool
+  tool: 发送邮件
+- node_type: output
+cannot_do: []
+assume: []
+walkthrough:
+- input: 你们的快递三天都没送到
+  expect: 发邮件通知主管，并回复客户已转交主管处理

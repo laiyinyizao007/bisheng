@@ -1,0 +1,24 @@
+name: 问答助手
+nodes:
+  - id: start_1
+    type: start
+  - id: ask
+    type: input
+    name: 用户提问
+  - id: answer
+    type: llm
+    name: 回答
+    params:
+      model_id: __DEFAULT_MODEL__
+      system_prompt: 你是一个乐于助人的助手。
+      user_prompt: "{{#ask.user_input#}}"
+  - id: reply
+    type: output
+    name: 输出回答
+    params:
+      message: {msg: "{{#answer.output#}}", files: []}
+edges:
+  - {from: start_1, to: ask}
+  - {from: ask, to: answer}
+  - {from: answer, to: reply}
+  - {from: reply, to: ask}
