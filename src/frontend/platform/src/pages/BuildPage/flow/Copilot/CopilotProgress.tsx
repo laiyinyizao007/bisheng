@@ -5,7 +5,9 @@ import { label } from "./DiffPreview";
 /**
  * The "how far along" box of a copilot answer, laid out like the chat's reasoning box
  * (`ReasoningDetails` in @bisheng/chat): a spinner and the current step while it runs,
- * the proposal's YAML streaming underneath; it folds itself away once the turn ends.
+ * the model's thinking (reasoning models think for a minute or more before answering)
+ * and then the proposal's YAML streaming underneath; it folds itself away once the turn
+ * ends.
  * The chat's box splits lines into paragraphs, which would lose YAML's indentation, so
  * the layout is reproduced here rather than reused.
  */
@@ -14,10 +16,12 @@ export interface Attempt {
     attempt: number;
     stage: "generating" | "validating";
     text: string;
+    reasoning: string;
     draft: string;
 }
 
-export type ProgressEnd = "running" | "done" | "discarded" | "failed" | "error" | "stopped";
+/** `answered`: a text reply, no proposal (the box stays only if there was thinking to show). */
+export type ProgressEnd = "running" | "done" | "answered" | "discarded" | "failed" | "error" | "stopped";
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -25,6 +29,7 @@ export default function CopilotProgress({ attempts, end, t }: { attempts: Attemp
     const running = end === "running";
     const [chosen, setChosen] = useState<boolean>();
     const open = chosen ?? running;
+    const thought = useRef<HTMLDivElement>(null);
     const body = useRef<HTMLPreElement>(null);
     const current = attempts[attempts.length - 1];
 
@@ -34,20 +39,28 @@ export default function CopilotProgress({ attempts, end, t }: { attempts: Attemp
     }, [running]);
 
     useEffect(() => {
-        if (running && body.current) body.current.scrollTop = body.current.scrollHeight;
-    }, [running, current?.draft]);
+        if (!running) return;
+        for (const box of [thought.current, body.current]) if (box) box.scrollTop = box.scrollHeight;
+    }, [running, current?.reasoning, current?.draft]);
 
-    // A plain text answer (no proposal written) needs no progress once it is over.
-    if (!current || (!running && !attempts.some((a) => a.draft))) return null;
+    // A plain text answer with nothing to show (no thinking, no proposal) needs no box once over.
+    if (!current || (!running && !attempts.some((a) => a.draft || a.reasoning))) return null;
 
+    // Only thinking so far, on the first attempt (a retry keeps saying which attempt it is).
+    const thinking =
+        current.attempt === 1 && current.stage === "generating" && Boolean(current.reasoning) && !current.text && !current.draft;
     const title = running
         ? current.stage === "validating"
             ? label(t, "copilot.statusValidating", "Validating…")
-            : current.attempt > 1
+            : thinking
+              ? label(t, "copilot.statusThinking", "Thinking…")
+              : current.attempt > 1
               ? label(t, "copilot.statusRetrying", `#${current.attempt}`, { attempt: current.attempt })
               : label(t, "copilot.statusGenerating", "Generating…")
         : end === "done"
           ? label(t, "copilot.progressDone", "Proposal ready")
+          : end === "answered"
+            ? label(t, "copilot.progressThought", "Thought it through")
           : end === "discarded"
             ? label(t, "copilot.discarded", "Discarded")
           : end === "failed"
@@ -57,7 +70,7 @@ export default function CopilotProgress({ attempts, end, t }: { attempts: Attemp
               : label(t, "copilot.stopped", "Stopped");
     const icon = running ? (
         <Outlined.Loading size={16} className="animate-spin text-primary duration-300" />
-    ) : end === "done" ? (
+    ) : end === "done" || end === "answered" ? (
         <Outlined.CheckCircle size={16} className="text-success" />
     ) : end === "stopped" || end === "discarded" ? (
         <Outlined.Square size={16} className="text-text-3" />
@@ -95,6 +108,15 @@ export default function CopilotProgress({ attempts, end, t }: { attempts: Attemp
                                 {label(t, "copilot.progressRejected", `#${a.attempt}`, { attempt: a.attempt })}
                             </p>
                         ))}
+                        {current.reasoning && (
+                            <div
+                                ref={thought}
+                                className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap text-muted-foreground"
+                                data-testid="copilot-reasoning"
+                            >
+                                {current.reasoning}
+                            </div>
+                        )}
                         {current.draft && (
                             <pre ref={body} className="max-h-64 overflow-auto whitespace-pre font-mono text-muted-foreground" data-testid="copilot-draft">
                                 {current.draft}

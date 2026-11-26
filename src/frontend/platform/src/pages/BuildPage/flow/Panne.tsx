@@ -275,17 +275,18 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
                     </div>
                 </div>
             </main>
+            {/* inside the canvas area, below the header, so the header buttons stay reachable */}
+            <CopilotDrawer
+                open={copilotOpen && !showApiPage}
+                flowId={flow?.id ? String(flow.id) : ''}
+                getCanvas={getCopilotCanvas}
+                onApply={applyCopilotCanvas}
+                onClose={() => setCopilotOpen(false)}
+            />
         </div>
         <div className={`flex flex-1 min-h-0 overflow-hidden ${showApiPage ? '' : 'hidden'}`}>
             <ApiMainPage type={'flow'} />
         </div>
-        <CopilotDrawer
-            open={copilotOpen && !showApiPage}
-            flowId={flow?.id ? String(flow.id) : ''}
-            getCanvas={getCopilotCanvas}
-            onApply={applyCopilotCanvas}
-            onClose={() => setCopilotOpen(false)}
-        />
     </div>
 };
 

@@ -190,7 +190,7 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
     const canExecute = availability.state === "ok";
     return (
         <div
-            className={`${open ? "" : "hidden"} fixed right-0 bottom-0 z-10 flex h-full w-[440px] flex-col border bg-[#fff] shadow-sm dark:bg-[#1B1B1B]`}
+            className={`${open ? "" : "hidden"} absolute right-0 top-0 z-10 flex h-full w-[440px] flex-col border bg-[#fff] shadow-sm dark:bg-[#1B1B1B]`}
             data-testid="copilot-drawer"
             onKeyDown={(event) => event.stopPropagation()}
         >
@@ -246,7 +246,9 @@ function reduceEvent(turn: Turn, event: CopilotEvent, t: Translate): Partial<Tur
             if (event.stage === "validating") return { attempts: withLast(attempts, { stage: "validating" }) };
             // Each (re)try streams a fresh answer into its own attempt; the rejected
             // one's text stays on screen until the new one has something to show.
-            return { attempts: [...attempts, { attempt: event.attempt, stage: "generating", text: "", draft: "" }] };
+            return { attempts: [...attempts, { attempt: event.attempt, stage: "generating", text: "", reasoning: "", draft: "" }] };
+        case "reasoning":
+            return { attempts: withLast(attempts, (last) => ({ reasoning: last.reasoning + event.text })) };
         case "delta":
             return { attempts: withLast(attempts, (last) => ({ text: last.text + event.text })) };
         case "draft":
@@ -270,7 +272,7 @@ function reduceEvent(turn: Turn, event: CopilotEvent, t: Translate): Partial<Tur
 
 /** Patch the last attempt (a stray piece before any status starts attempt 1). */
 function withLast(attempts: Attempt[], patch: Partial<Attempt> | ((last: Attempt) => Partial<Attempt>)): Attempt[] {
-    const all = attempts.length ? attempts : [{ attempt: 1, stage: "generating" as const, text: "", draft: "" }];
+    const all = attempts.length ? attempts : [{ attempt: 1, stage: "generating" as const, text: "", reasoning: "", draft: "" }];
     const last = all[all.length - 1];
     return [...all.slice(0, -1), { ...last, ...(typeof patch === "function" ? patch(last) : patch) }];
 }
@@ -287,7 +289,8 @@ function progressEnd(turn: Turn): ProgressEnd {
     if (turn.outcome === "discarded") return "discarded";
     if (turn.proposal) return "done";
     if (turn.error) return "error";
-    return "failed";
+    if (turn.issues) return "failed";
+    return "answered"; // a text reply: nothing was proposed, nothing failed
 }
 
 const USER_AVATAR = typeof __APP_ENV__ !== "undefined" ? `${__APP_ENV__.BASE_URL}/assets/user.png` : "";

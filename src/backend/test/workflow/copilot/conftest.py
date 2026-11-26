@@ -74,6 +74,10 @@ class ScriptedLLM:
                 raise
         if isinstance(answer, BaseException):
             raise answer
+        if isinstance(answer, tuple):  # (reasoning, reply): reasoning first, as the platform LLM streams it
+            reasoning, answer = answer
+            for start in range(0, len(reasoning), 7):
+                yield SimpleNamespace(content="", additional_kwargs={"reasoning_content": reasoning[start : start + 7]})
         for start in range(0, len(answer), 7):
             yield SimpleNamespace(content=answer[start : start + 7])
 

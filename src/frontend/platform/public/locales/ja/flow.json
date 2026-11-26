@@ -627,6 +627,8 @@
         "statusGenerating": "提案を生成しています…",
         "statusValidating": "提案を検証しています…",
         "statusRetrying": "提案が検証を通りませんでした。{{attempt}} 回目を試しています…",
+        "statusThinking": "考えています…",
+        "progressThought": "考え終わりました",
         "progressDone": "提案ができました",
         "progressError": "生成が中断されました",
         "progressFailed": "提案が検証を通りませんでした",
