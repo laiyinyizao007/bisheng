@@ -99,8 +99,6 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
      */
     const submit = useCallback(async (message: string, answered?: { turnId: number; answers: Record<string, string> }) => {
         if (!message || useCopilotSession.getState().busy) return;
-        const controller = new AbortController();
-        startTurn(controller); // taken at once: a second submit in the same tick is refused
 
         const canvas = getCanvas();
         // Only final replies (a stopped turn's half-streamed text is not the model's answer),
@@ -121,6 +119,10 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
             userTurn,
             reply,
         ]);
+        // Taken before the first await, so nothing can submit in between (the check above and
+        // this run in one go); taken after the steps that could throw, so busy cannot stick.
+        const controller = new AbortController();
+        startTurn(controller);
 
         // Events are applied in batches (one render per FLUSH_MS), not one render per chunk:
         // a long draft arrives in hundreds of pieces.
