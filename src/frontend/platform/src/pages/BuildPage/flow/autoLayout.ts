@@ -169,6 +169,38 @@ export function readyToLayout(current: Node[], applied: Node[]): boolean {
     return applied.every((node) => node.type === NOTE_TYPE || Boolean(shown.get(node.id)?.measured?.width));
 }
 
+/** Window event a node fires when the user folds or unfolds it: the editor re-lays the canvas out. */
+export const NODE_FOLD_EVENT = "bisheng:flow-node-fold";
+
+/** Every node folded (``data.expand = false``, the flag the node's fold toggle reads), as new objects. */
+export function collapsed<N extends Node>(nodes: N[]): N[] {
+    return nodes.map((node) => (node.type === NOTE_TYPE ? node : { ...node, data: { ...node.data, expand: false } }));
+}
+
+/** A key that changes whenever any node's measured size does. */
+export function sizeKey(nodes: Node[]): string {
+    return nodes.map((node) => `${node.id}:${node.measured?.width ?? 0}x${node.measured?.height ?? 0}`).join("|");
+}
+
+/**
+ * Fed one ``sizeKey`` per animation frame, says when to lay out: a fold or unfold is
+ * re-measured a frame or two later, so with a ``before`` key it first waits for the sizes
+ * to change; then it waits until they hold for one more frame.
+ */
+export function sizeSettler(before: string | null): (key: string) => boolean {
+    let changed = before === null;
+    let last: string | null = null;
+    return (key) => {
+        if (!changed) {
+            if (key === before) return false;
+            changed = true;
+        }
+        const steady = key === last;
+        last = key;
+        return steady;
+    };
+}
+
 function corner(nodes: Node[]): { x: number; y: number } {
     const xs = nodes.map((node) => node.position?.x).filter((v): v is number => Number.isFinite(v));
     const ys = nodes.map((node) => node.position?.y).filter((v): v is number => Number.isFinite(v));

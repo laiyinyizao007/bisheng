@@ -19,7 +19,7 @@ import NoteNode from "./NoteNode";
 import Sidebar from "./Sidebar";
 import CopilotDrawer from "./Copilot/CopilotDrawer";
 import { applyCanvas } from "./Copilot/panels";
-import { autoLayout, readyToLayout } from "./autoLayout";
+import { NODE_FOLD_EVENT, autoLayout, collapsed, readyToLayout, sizeKey, sizeSettler } from "./autoLayout";
 import useFlowStore from "./flowStore";
 
 // 自定义组件
@@ -85,9 +85,9 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
     };
 
     // Auto layout (after arksusdemo's DAG editor): the toolbar button animates the nodes
-    // into place as its own undo step; a copilot proposal that adds nodes is laid out
-    // right after it lands, inside the apply's undo step, once React Flow has measured
-    // the new nodes (their real sizes are what keeps the columns apart).
+    // into place as its own undo step; an applied copilot canvas (folded) and a node folded
+    // or unfolded by hand are laid out once React Flow has re-measured the nodes (their
+    // real sizes are what keeps the columns apart).
     // The pending animation frame: a new layout, an apply, a drag, undo / redo and
     // leaving the editor all cancel it, so nothing overwrites positions after the fact.
     const layoutFrame = useRef(0)
@@ -126,13 +126,13 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
     const [showApiPage, setShowApiPage] = useState(false)
     // F007: the copilot drawer's open state lives here, beside the canvas it edits.
     const [copilotOpen, setCopilotOpen] = useState(false)
-    const layoutCanvas = useCallback((animate: boolean) => {
+    const layoutCanvas = useCallback((animate: boolean, fit = true) => {
         cancelLayout()
         const instance = instanceRef.current
         if (!instance) return
         const from: Node[] = instance.getNodes()
         const target = new Map<string, XYPosition>(autoLayout(from, instance.getEdges()).map(n => [n.id, n.position]))
-        const done = () => instanceRef.current?.fitView({ duration: 300 })
+        const done = () => { if (fit) instanceRef.current?.fitView({ duration: 300 }) }
         if (!animate) {
             setNodes(nodes => nodes.map(n => target.has(n.id) ? { ...n, position: target.get(n.id) } : n))
             layoutFrame.current = requestAnimationFrame(done)
@@ -157,18 +157,41 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
         takeSnapshot()
         layoutCanvas(true)
     }, [takeSnapshot, layoutCanvas])
-    const applyCopilotCanvas = useCallback((canvas: { nodes: Node[]; edges: Edge[] }, options?: { layout?: boolean }) => {
-        cancelLayout() // an animation still running would move the new canvas's nodes
-        applyCanvas({ takeSnapshot, setNodes, setEdges }, canvas)
-        if (!options?.layout) return
+    // Lay out once the sizes React Flow measures have settled (or on what it has after
+    // LAYOUT_MEASURE_FRAMES): ``before`` is the size key from just before the change.
+    const layoutWhenSettled = useCallback((before: string | null, ready: () => boolean, animate: boolean, fit: boolean) => {
+        const settled = sizeSettler(before)
         let frames = 0
-        const whenMeasured = () => {
-            const ready = readyToLayout(instanceRef.current?.getNodes() ?? [], canvas.nodes)
-            if (ready || ++frames > LAYOUT_MEASURE_FRAMES) layoutCanvas(false)
-            else layoutFrame.current = requestAnimationFrame(whenMeasured)
+        const tick = () => {
+            const shown: Node[] = instanceRef.current?.getNodes() ?? []
+            const done = ready() && settled(sizeKey(shown))
+            if (done || ++frames > LAYOUT_MEASURE_FRAMES) layoutCanvas(animate, fit)
+            else layoutFrame.current = requestAnimationFrame(tick)
         }
-        layoutFrame.current = requestAnimationFrame(whenMeasured)
-    }, [takeSnapshot, setNodes, setEdges, layoutCanvas, cancelLayout])
+        layoutFrame.current = requestAnimationFrame(tick)
+    }, [layoutCanvas])
+    // A copilot canvas lands with every node folded and is then laid out, inside the
+    // apply's undo step (``options.layout`` is moot: folding changes the sizes anyway).
+    const applyCopilotCanvas = useCallback((canvas: { nodes: Node[]; edges: Edge[] }) => {
+        cancelLayout() // an animation still running would move the new canvas's nodes
+        const before = sizeKey(instanceRef.current?.getNodes() ?? [])
+        const folded = { nodes: collapsed(canvas.nodes), edges: canvas.edges }
+        applyCanvas({ takeSnapshot, setNodes, setEdges }, folded)
+        layoutWhenSettled(before, () => readyToLayout(instanceRef.current?.getNodes() ?? [], folded.nodes), false, true)
+    }, [takeSnapshot, setNodes, setEdges, layoutWhenSettled, cancelLayout])
+    // Folding or unfolding a node by hand re-lays the canvas out, animated, as its own
+    // undo step; the view stays where the user is looking.
+    useEffect(() => {
+        const onFold = () => {
+            if (!instanceRef.current) return
+            cancelLayout()
+            const before = sizeKey(instanceRef.current.getNodes())
+            takeSnapshot()
+            layoutWhenSettled(before, () => true, true, false)
+        }
+        window.addEventListener(NODE_FOLD_EVENT, onFold)
+        return () => window.removeEventListener(NODE_FOLD_EVENT, onFold)
+    }, [takeSnapshot, layoutWhenSettled, cancelLayout])
     // The canvas as it is right now (unsaved edits included): what a copilot turn is based on.
     const getCopilotCanvas = useCallback(() => {
         const current = reactFlowInstance?.toObject()

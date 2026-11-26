@@ -12,6 +12,7 @@ import { Outlined } from "bisheng-icons";
 import { useCallback,useContext,useEffect,useMemo,useRef,useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Sidebar from '../Sidebar';
+import { NODE_FOLD_EVENT } from '../autoLayout';
 import EditText from './EditText';
 import NodeLogo from './NodeLogo';
 import NodeTabs from './NodeTabs';
@@ -229,6 +230,8 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
     }
 
     const [expend, setExpend] = useState(node.expand === undefined ? true : node.expand)
+    // A canvas applied over this node (copilot lands folded) can change the flag under it.
+    useEffect(() => { setExpend(node.expand === undefined ? true : node.expand) }, [node.expand])
 
     const { isVisible, handleMouseEnter, handleMouseLeave } = useHoverToolbar();
 
@@ -287,6 +290,7 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
                             onClick={() => {
                                 setExpend(!expend)
                                 node.expand = !expend
+                                window.dispatchEvent(new Event(NODE_FOLD_EVENT)) // the editor re-lays out
                             }}>
                             <Outlined.Down
                                 className={`bisheng-label ${expend && 'rotate-180'}`}

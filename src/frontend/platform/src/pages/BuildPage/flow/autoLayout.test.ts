@@ -1,6 +1,6 @@
 import type { Edge, Node } from "@xyflow/react";
 import { describe, expect, it } from "vitest";
-import { autoLayout, readyToLayout } from "./autoLayout";
+import { autoLayout, collapsed, readyToLayout, sizeKey, sizeSettler } from "./autoLayout";
 
 function node(id: string, type = "llm", size?: { width: number; height: number }): Node {
     return {
@@ -126,5 +126,40 @@ describe("autoLayout (layered, left to right)", () => {
         const edges = [edge("s", "a"), edge("s", "b"), edge("b", "b2"), edge("a", "a2")];
         const laid = autoLayout([nodes[0], nodes[1], nodes[2], nodes[4], nodes[3]], edges);
         expect(Math.sign(at(laid, "a").y - at(laid, "b").y)).toBe(Math.sign(at(laid, "a2").y - at(laid, "b2").y));
+    });
+});
+
+describe("collapsed (a copilot canvas lands with every node folded)", () => {
+    it("folds every node and leaves the input untouched", () => {
+        const input = [node("a"), { ...node("b"), data: { type: "llm", expand: true } } as Node];
+        const out = collapsed(input);
+        expect(out.map((n) => (n.data as { expand?: boolean }).expand)).toEqual([false, false]);
+        expect((input[1].data as { expand?: boolean }).expand).toBe(true);
+        expect(out[0].data).not.toBe(input[0].data); // a new data object: the node component sees the change
+    });
+    it("leaves notes alone (they have no fold)", () => {
+        const note = { ...node("n"), type: "noteNode" } as Node;
+        expect(collapsed([note])[0]).toBe(note);
+    });
+});
+
+describe("sizeSettler (lay out once the new sizes have settled)", () => {
+    const small = sizeKey([node("a", "llm", { width: 300, height: 80 })]);
+    const big = sizeKey([node("a", "llm", SIZE)]);
+    it("sizeKey changes with a measured size", () => {
+        expect(small).not.toBe(big);
+        expect(sizeKey([node("a", "llm", SIZE)])).toBe(big);
+    });
+    it("after a fold: waits for the size to change, then for it to hold for a frame", () => {
+        const settled = sizeSettler(big);
+        expect(settled(big)).toBe(false); // not re-measured yet
+        expect(settled(small)).toBe(false); // changed, not yet steady
+        expect(settled(small)).toBe(true);
+    });
+    it("without a 'before': only waits for the sizes to hold", () => {
+        const settled = sizeSettler(null);
+        expect(settled(big)).toBe(false);
+        expect(settled(small)).toBe(false);
+        expect(settled(small)).toBe(true);
     });
 });
