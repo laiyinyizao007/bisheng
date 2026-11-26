@@ -56,6 +56,7 @@ vi.mock("@bisheng/chat", () => ({
 }));
 
 import CopilotDrawer, { type CanvasState } from "./CopilotDrawer";
+import { endCopilotSession } from "./session";
 
 const PROPOSED = { nodes: [{ id: "new", position: { x: 1, y: 1 }, data: { type: "llm", name: "summary" } }], edges: [] };
 
@@ -108,6 +109,7 @@ beforeEach(() => {
 });
 afterEach(() => {
     cleanup();
+    endCopilotSession(); // the session outlives the component, as it does in the editor
     vi.clearAllMocks();
 });
 
@@ -465,7 +467,37 @@ describe("stop and keep", () => {
         await send("x");
         await waitFor(() => expect(seenSignal).toBeDefined());
         unmount();
+        expect(seenSignal?.aborted).toBe(false); // the editor re-mounting (Save does) is not leaving
+        act(() => endCopilotSession());
         expect(seenSignal?.aborted).toBe(true);
+    });
+
+    it("the editor re-mounting (Save) keeps the conversation and a turn still streaming", async () => {
+        let release: () => void = () => undefined;
+        const [status, message, proposal, done] = proposalEvents();
+        mocks.stream.mockImplementation(async function* () {
+            yield status;
+            await new Promise<void>((resolve) => (release = resolve));
+            yield message;
+            yield proposal;
+            yield done;
+        });
+        const first = renderDrawer();
+        await send("keep me");
+        first.unmount();
+        renderDrawer();
+        expect(screen.getByTestId("copilot-user")).toHaveTextContent("keep me");
+        await act(async () => release());
+        expect(await screen.findByTestId("copilot-diff")).toBeInTheDocument();
+    });
+
+    it("another workflow starts a fresh conversation", async () => {
+        mocks.stream.mockImplementation(streamOf(proposalEvents()));
+        const { rerender, props } = renderDrawer();
+        await send("for f1");
+        await screen.findByTestId("copilot-diff");
+        rerender(<CopilotDrawer {...props} flowId="f2" />);
+        await waitFor(() => expect(screen.queryByTestId("copilot-user")).toBeNull());
     });
 
     it("stopping after the proposal arrived keeps it choosable", async () => {
