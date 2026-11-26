@@ -70,6 +70,8 @@ class FlowVersionDao(FlowVersionBase):
             ).first()
             if parent is None:
                 raise NotFoundError()
+            # A version lives with its workflow: not the default, not the context fill-in.
+            version.tenant_id = parent.tenant_id
             session.add(version)
             session.commit()
             session.refresh(version)

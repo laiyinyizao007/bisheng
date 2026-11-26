@@ -176,7 +176,8 @@ class FlowDao(FlowBase):
 
         with get_sync_db_session() as session:
             session.add(flow_info)
-            # Create a default version
+            # Create a default version, in the workflow's own tenant (not left to the
+            # context fill-in, which could differ from an explicitly stamped workflow).
             flow_version = FlowVersion(
                 name="v0",
                 is_current=1,
@@ -185,6 +186,7 @@ class FlowDao(FlowBase):
                 create_time=datetime.now(),
                 user_id=flow_info.user_id,
                 flow_type=flow_type,
+                tenant_id=flow_info.tenant_id,
             )
             session.add(flow_version)
             session.commit()

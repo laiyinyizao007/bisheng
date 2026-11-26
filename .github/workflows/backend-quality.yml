@@ -56,6 +56,7 @@ jobs:
           uv run pytest -q
           test/workflow/test_node_templates.py
           test/workflow/test_tool_node_template.py
+          test/workflow/test_create_workflow_tenant.py
           test/open_api/test_scopes.py
           test/open_api/test_tools_v2.py
           test/open_api/test_workflow_write_v2.py

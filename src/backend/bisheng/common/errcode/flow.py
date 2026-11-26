@@ -79,6 +79,13 @@ class WorkFlowInvalidUserInputError(BaseErrorCode):
     Msg: str = "Invalid user input for the waiting workflow"
 
 
+class WorkflowCreateOutsideOwnTenantError(BaseErrorCode):
+    # A super admin managing another tenant (F019 admin scope) creates in their own
+    # tenant only: the editor's business routes would not see a workflow elsewhere.
+    Code: int = 10570
+    Msg: str = "Switch the management view back to your own tenant before creating a workflow"
+
+
 class AppWriteAuthError(BaseErrorCode):
     Code: int = 10599
     Msg: str = "No Apply Write Permission"

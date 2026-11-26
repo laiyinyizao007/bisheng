@@ -25,12 +25,14 @@ from bisheng.common.errcode.flow import (
     CurVersionDelError,
     NotFoundVersionError,
     VersionNameExistsError,
+    WorkflowCreateOutsideOwnTenantError,
     WorkflowNameExistsError,
     WorkFlowOnlineEditError,
 )
 from bisheng.common.errcode.http_error import NotFoundError, UnAuthorizedError
 from bisheng.common.services import telemetry_service
 from bisheng.common.services.base import BaseService
+from bisheng.core.context.tenant import get_current_tenant_id
 from bisheng.core.database import get_sync_db_session
 from bisheng.core.logger import trace_id_var
 from bisheng.database.models.flow import Flow, FlowCreate, FlowDao, FlowRead, FlowStatus, FlowType
@@ -388,6 +390,15 @@ class FlowService(BaseService):
         the create-app menu gate + quota) — this method only gates **what**
         may be created.
         """
+        # A super admin managing another tenant (F019 admin scope) is refused before
+        # anything is written. This route is a management route, so the request runs in
+        # the managed tenant; the workflow would be invisible to the editor's business
+        # routes (guest link, test run, copilot, report run in the user's own tenant,
+        # F019 AC-07). Stamping the user's tenant regardless — as this used to — wrote the
+        # row, then failed its own read-back with 500 and left the row behind.
+        context_tenant = get_current_tenant_id()
+        if context_tenant is not None and context_tenant != login_user.tenant_id:
+            raise WorkflowCreateOutsideOwnTenantError.http_exception()
         # Determine if the user repeats the skill name
         with get_sync_db_session() as session:
             if session.exec(
@@ -402,10 +413,8 @@ class FlowService(BaseService):
                 raise WorkflowNameExistsError.http_exception()
         flow.user_id = login_user.user_id
         db_flow = Flow.model_validate(flow)
-        # Defense-in-depth: Flow.tenant_id default is None and the framework's
-        # before_flush hook (bisheng.core.database.tenant_filter) auto-fills it
-        # from current_tenant_id. Keeping this explicit assignment so future
-        # callers without an HTTP middleware (CLI, scripts) still set it right.
+        # Explicit so callers without an HTTP middleware (CLI, scripts) still set it right;
+        # with a context it is the same tenant (checked above).
         db_flow.tenant_id = login_user.tenant_id
         db_flow.create_time = None
         db_flow.update_time = None
