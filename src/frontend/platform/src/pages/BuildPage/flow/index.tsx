@@ -5,6 +5,7 @@ import { flowVersionCompatible } from "@/util/flowCompatible";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import Panne from "./Panne";
+import { endCopilotSession } from "./Copilot/session";
 import useFlowStore from "./flowStore";
 
 
@@ -58,6 +59,7 @@ export default function FlowPage() {
 
         return () => {
             setFlow(null);
+            endCopilotSession(); // leaving the editor ends the copilot conversation (AC-21)
             clearRunCache();
             clearNotifications()
         }

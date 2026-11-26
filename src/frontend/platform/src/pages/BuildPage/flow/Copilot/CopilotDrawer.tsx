@@ -3,7 +3,6 @@ import {
     checkCopilotAvailability,
     streamCopilot,
     type CopilotEvent,
-    type CopilotProposal,
     type CopilotTurn,
 } from "@/controllers/API/workflowCopilot";
 import { PlatformChatMarkdown } from "@/components/bs-comp/appChat/PlatformChatMarkdown";
@@ -16,12 +15,24 @@ import { useTranslation } from "react-i18next";
 import { canvasDigest } from "./canvasDigest";
 import CopilotProgress, { type Attempt, type ProgressEnd } from "./CopilotProgress";
 import DiffPreview, { label } from "./DiffPreview";
+import {
+    bindCopilotSession,
+    finishTurn,
+    nextTurnId,
+    restartConversation,
+    startTurn,
+    updateTurn,
+    updateTurns,
+    useCopilotSession,
+    type Turn,
+} from "./session";
 
 /**
- * F007 copilot drawer (design decisions 7, 9, 10). Kept mounted while the editor is open
- * and only hidden when closed, so the conversation survives closing the drawer and is
- * gone when the page is left (AC-21). Nothing here saves: "apply" hands the merged canvas
- * to the editor, which snapshots it for undo (AC-18).
+ * F007 copilot drawer (design decisions 7, 9, 10). The conversation lives in the copilot
+ * session (``./session``), not here: the editor re-mounts this component on Save, and the
+ * conversation, a turn still streaming included, carries over; it is gone when the page is
+ * left (AC-21). Nothing here saves: "apply" hands the merged canvas to the editor, which
+ * snapshots it for undo (AC-18).
  */
 
 export interface CanvasState {
@@ -39,24 +50,6 @@ interface Props {
     onClose: () => void;
 }
 
-type Outcome = "applied" | "discarded" | "stopped";
-
-interface Turn {
-    id: number;
-    role: "user" | "assistant";
-    /** The final reply (``message`` event); while streaming, see {@link shownText}. */
-    text: string;
-    /** One per model attempt: its streamed explanation and YAML draft. */
-    attempts?: Attempt[];
-    running?: boolean;
-    proposal?: CopilotProposal;
-    issues?: string[];
-    error?: string;
-    outcome?: Outcome;
-    /** Digest of the canvas this turn was sent with (AC-19). */
-    baseDigest?: string;
-}
-
 type Availability = { state: "checking" } | { state: "ok" } | { state: "unavailable"; reason: string };
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -65,12 +58,14 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
     const tr = t as unknown as Translate;
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
-    const controllerRef = useRef<AbortController | null>(null);
-    const nextId = useRef(1);
-    const [turns, setTurns] = useState<Turn[]>([]);
-    const [busy, setBusy] = useState(false);
     const [availability, setAvailability] = useState<Availability>({ state: "checking" });
-    const [session, setSession] = useState(0);
+    useEffect(() => bindCopilotSession(flowId), [flowId]);
+    // Until the session is bound to this workflow, it may still hold another one's turns.
+    const bound = useCopilotSession((state) => state.flowId === flowId);
+    const storedTurns = useCopilotSession((state) => state.turns);
+    const turns = bound ? storedTurns : NO_TURNS;
+    const busy = useCopilotSession((state) => bound && state.busy);
+    const session = useCopilotSession((state) => state.session);
 
     // The chat's follow-the-bottom policy: every streamed batch re-renders the list, and
     // scrolling up to read stops the following until the next message is sent. The hook
@@ -81,9 +76,6 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
         [turns],
     );
     useConversationScroll({ scrollRef, sessionKey: `copilot-${session}`, messages: scrollMessages, canLoadOlder: false, onLoadOlder: () => undefined });
-
-    // Leaving the editor ends a turn still streaming: the model call is not left running.
-    useEffect(() => () => controllerRef.current?.abort(), []);
 
     useEffect(() => {
         if (!open || !flowId) return;
@@ -99,9 +91,7 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
         };
     }, [open, flowId]);
 
-    const update = useCallback((id: number, patch: Partial<Turn> | ((turn: Turn) => Partial<Turn>)) => {
-        setTurns((all) => all.map((turn) => (turn.id === id ? { ...turn, ...(typeof patch === "function" ? patch(turn) : patch) } : turn)));
-    }, []);
+    const update = updateTurn;
 
     const send = useCallback(async () => {
         const message = inputRef.current?.value.trim() ?? "";
@@ -111,13 +101,12 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
         const canvas = getCanvas();
         // Only final replies: a stopped turn's half-streamed text is not the model's answer.
         const history: CopilotTurn[] = turns.filter((turn) => turn.text).map((turn) => ({ role: turn.role, content: turn.text }));
-        const userTurn: Turn = { id: nextId.current++, role: "user", text: message };
-        const reply: Turn = { id: nextId.current++, role: "assistant", text: "", attempts: [], running: true, baseDigest: canvasDigest(canvas.nodes, canvas.edges) };
-        setTurns((all) => [...all, userTurn, reply]);
+        const userTurn: Turn = { id: nextTurnId(), role: "user", text: message };
+        const reply: Turn = { id: nextTurnId(), role: "assistant", text: "", attempts: [], running: true, baseDigest: canvasDigest(canvas.nodes, canvas.edges) };
+        updateTurns((all) => [...all, userTurn, reply]);
 
         const controller = new AbortController();
-        controllerRef.current = controller;
-        setBusy(true);
+        startTurn(controller);
         // Events are applied in batches (one render per FLUSH_MS), not one render per chunk:
         // a long draft arrives in hundreds of pieces.
         const queued: CopilotEvent[] = [];
@@ -145,14 +134,13 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
                 update(reply.id, { error: reason });
             }
         } finally {
-            controllerRef.current = null;
-            setBusy(false);
+            finishTurn(controller);
             update(reply.id, { running: false });
         }
     }, [busy, flowId, getCanvas, tr, turns, update]);
 
     const stop = useCallback(() => {
-        controllerRef.current?.abort();
+        useCopilotSession.getState().controller?.abort();
     }, []);
 
     const discard = useCallback((turn: Turn) => update(turn.id, { outcome: "discarded" }), [update]);
@@ -190,7 +178,9 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
     const canExecute = availability.state === "ok";
     return (
         <div
-            className={`${open ? "" : "hidden"} absolute right-0 top-0 z-10 flex h-full w-[440px] flex-col border bg-[#fff] shadow-sm dark:bg-[#1B1B1B]`}
+            // A column beside the canvas, not a layer over it: the canvas narrows while it is
+            // open, so fitting the view never puts nodes behind it.
+            className={`${open ? "" : "hidden"} z-10 flex h-full w-[440px] shrink-0 flex-col border bg-[#fff] shadow-sm dark:bg-[#1B1B1B]`}
             data-testid="copilot-drawer"
             onKeyDown={(event) => event.stopPropagation()}
         >
@@ -200,7 +190,8 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
                     <Outlined.Close size={16} />
                 </Button>
             </div>
-            <div ref={scrollRef} className="flex-1 space-y-1 overflow-y-auto px-2 py-2 text-sm">
+            {/* pb-14: the composer floats "new conversation" 56px above itself, over this list */}
+            <div ref={scrollRef} className="flex-1 space-y-1 overflow-y-auto px-2 pb-14 pt-2 text-sm">
                 {availability.state === "checking" && <div className="text-gray-500">{label(tr, "copilot.checking", "Checking…")}</div>}
                 {availability.state === "unavailable" && (
                     <div className="rounded-md bg-red-50 p-2 text-red-700 dark:bg-red-950 dark:text-red-300" data-testid="copilot-unavailable">
@@ -219,10 +210,7 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
                 showStop={busy}
                 onStop={stop}
                 showRestart={!busy && turns.length > 0}
-                onRestart={() => {
-                    setTurns([]);
-                    setSession((value) => value + 1);
-                }}
+                onRestart={restartConversation}
                 onSend={send}
                 labels={{
                     send: label(tr, "copilot.send", "Send"),
@@ -237,6 +225,7 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
 }
 
 const FLUSH_MS = 50;
+const NO_TURNS: Turn[] = [];
 
 /** What one streamed event changes in its reply turn. */
 function reduceEvent(turn: Turn, event: CopilotEvent, t: Translate): Partial<Turn> {
