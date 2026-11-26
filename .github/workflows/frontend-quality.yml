@@ -66,9 +66,12 @@ jobs:
       # Named files, not the whole suite: platform vitest carries ~40 pre-existing
       # failures unrelated to workflows, and a gate that is always red guards nothing.
       # Grow this list as suites are brought to green; never shrink it.
-      - name: Platform unit tests (node / tool templates come from the backend)
+      - name: Platform unit tests (workflow-as-code templates and the F007 copilot)
         run: >-
           pnpm --filter bisheng exec vitest run
           src/controllers/API/workflow.test.ts
           src/util/flowUtils.toolTree.test.ts
           src/pages/BuildPage/flow/Sidebar.templates.test.tsx
+          src/controllers/requestStream.test.ts
+          src/controllers/API/workflowCopilot.test.ts
+          src/pages/BuildPage/flow/Copilot

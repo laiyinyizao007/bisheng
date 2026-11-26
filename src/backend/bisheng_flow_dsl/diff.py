@@ -28,8 +28,8 @@ The same structure feeds ``render`` — the human text is built from the
 machine-readable diff and nothing else, so the two cannot disagree (AC-23).
 
 A side that is not shaped like a definition is refused, not half-compared:
-online it is a platform defect (``EXIT_DEFECT``), locally it is the
-declaration's problem (``EXIT_LOCAL_INVALID``). A diff that silently skipped a
+online it is a platform defect (``kind="defect"``), locally it is the
+declaration's problem (``kind="invalid"``). A diff that silently skipped a
 node it could not read would report "identical" for a workflow it never saw.
 """
 
@@ -39,7 +39,7 @@ import json
 from collections import Counter
 from typing import Any
 
-from bisheng_cli.errors import EXIT_DEFECT, EXIT_LOCAL_INVALID, CliError
+from bisheng_flow_dsl.errors import DslError
 
 #: Node ``data`` fields with meaning beyond the parameters (decision 5).
 #: ``type`` is in on the "new fields are included" rule: same id, different node.
@@ -281,18 +281,18 @@ def _finite(value: Any, side: str, where: str) -> None:
         pass  # non-string dict keys: handled by ``_canon``'s repr fallback
 
 
-def _shape(side: str, reason: str) -> CliError:
+def _shape(side: str, reason: str) -> DslError:
     if side == "online":
-        return CliError(
+        return DslError(
             f"线上定义形状不对，无法比较：{reason}",
-            exit_code=EXIT_DEFECT,
-            next_step="线上数据不是平台画布会产生的形状：请带上工作流 id 与本条输出报平台故障；不要据此 push。",
+            kind="defect",
+            reason="online_shape",
             details={"side": side, "reason": reason},
         )
-    return CliError(
+    return DslError(
         f"本地定义形状不对，无法比较：{reason}",
-        exit_code=EXIT_LOCAL_INVALID,
-        next_step="先用 bisheng flow compile 确认声明能编译通过，再做 diff。",
+        kind="invalid",
+        reason="local_shape",
         details={"side": side, "reason": reason},
     )
 

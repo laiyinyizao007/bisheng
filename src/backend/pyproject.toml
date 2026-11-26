@@ -62,6 +62,9 @@ dependencies = [
     "pymongo>=4.15.3",
     "pymupdf==1.27.2.3",
     "pymysql>=1.1.2",
+    # Direct since F007: the workflow copilot parses model output with yaml.safe_load and
+    # bisheng_flow_dsl dumps declarations. Same ceiling as the CLI (src/bisheng-cli/pyproject.toml).
+    "pyyaml>=6.0,<7.0",
     # DaMeng database drivers — available on PyPI (Linux x86_64/aarch64, Windows).
     # dmPython bundles the dmssl package which includes the required native .so
     # files, so no separate DaMeng client installation is needed.
@@ -167,7 +170,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["bisheng", "bisheng_langchain"]
+known-first-party = ["bisheng", "bisheng_langchain", "bisheng_flow_dsl"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -21,8 +21,7 @@ from typing import Any
 import pytest
 
 from bisheng_cli.errors import EXIT_DEFECT, EXIT_LOCAL_INVALID, CliError
-from bisheng_cli.flow.compiler import compile_spec
-from bisheng_cli.flow.diff import diff, online_only_items, render
+from bisheng_cli.flow.dsl import compile_spec, diff, online_only_items, render
 from tests.helpers.flow_fixtures import find_param, templates, tools
 
 SPEC: dict[str, Any] = {

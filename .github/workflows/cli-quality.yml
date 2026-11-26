@@ -18,6 +18,10 @@ on:
       - "src/backend/bisheng/workflow/common/node_templates.py"
       - "src/backend/bisheng/workflow/common/condition.py"
       - "src/backend/bisheng/dev_toolkit/skills/workflow-as-code/**"
+      # The shared declaration rules (F007 design decision 1): they live under
+      # src/backend/ but ship inside the CLI wheel, and this is the only job that
+      # tests and lints them.
+      - "src/backend/bisheng_flow_dsl/**"
       - "scripts/pack_cli_wheel.sh"
       - ".github/workflows/cli-quality.yml"
   workflow_dispatch:
@@ -53,9 +57,11 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Ruff
+        # ../backend/bisheng_flow_dsl is bundled into the wheel; the backend has no
+        # ruff gate in CI, so it is linted here (its ruff.toml extends the backend rules).
         run: |
-          uv run ruff check .
-          uv run ruff format --check .
+          uv run ruff check . ../backend/bisheng_flow_dsl
+          uv run ruff format --check . ../backend/bisheng_flow_dsl
 
       # `network`-marked cases need a real platform and are skipped by default;
       # they only run during the 114 manual verification.

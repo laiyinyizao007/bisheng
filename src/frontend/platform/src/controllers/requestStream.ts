@@ -4,9 +4,14 @@ import request, {
   requestAuthHeaders,
 } from "./request";
 
+/**
+ * POST `url` and hand back the NDJSON body. `body` is sent as JSON (default `{}`);
+ * it comes third so existing `(url, signal)` callers are unchanged.
+ */
 export async function requestStream(
   url: string,
   signal?: AbortSignal,
+  body?: unknown,
 ): Promise<ReadableStream<Uint8Array>> {
   const sharedBase = (request.defaults.baseURL || "/").replace(/\/?$/, "/");
   const target = new URL(
@@ -25,7 +30,7 @@ export async function requestStream(
         "Content-Type": "application/json",
         Accept: "application/x-ndjson",
       },
-      body: "{}",
+      body: JSON.stringify(body ?? {}),
     });
   } catch (error) {
     if (signal?.aborted) throw error;

@@ -88,3 +88,25 @@ class AppWriteAuthError(BaseErrorCode):
 class AppInvalidCursorError(BaseErrorCode):
     Code: int = 10550
     Msg: str = "Invalid pagination cursor"
+
+
+# F007 workflow copilot: 10560-10569 (10566-10569 reserved). Copy lives in
+# packages/locales/src/api_errors/*.json; keep the `Code: int =` form so check-i18n sees it.
+class WorkflowCopilotModelNotConfiguredError(BaseErrorCode):
+    Code: int = 10560
+    Msg: str = "The workflow default model is not configured"
+
+
+class WorkflowCopilotModelUnavailableError(BaseErrorCode):
+    Code: int = 10561
+    Msg: str = "The workflow default model has been deleted or is offline"
+
+
+class WorkflowCopilotTooLargeError(BaseErrorCode):
+    Code: int = 10562
+    Msg: str = "The canvas or the conversation is too long for the copilot"
+
+
+class WorkflowCopilotModelCallError(BaseErrorCode):
+    Code: int = 10563
+    Msg: str = "The copilot model call failed or timed out"
