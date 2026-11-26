@@ -186,7 +186,7 @@ export default function CopilotDrawer({ open, flowId, getCanvas, onApply, onClos
     const canExecute = availability.state === "ok";
     return (
         <div
-            className={`${open ? "" : "hidden"} fixed right-0 bottom-0 z-10 flex h-full w-[440px] flex-col border bg-[#fff] shadow-sm dark:bg-[#1B1B1B]`}
+            className={`${open ? "" : "hidden"} absolute right-0 top-0 z-10 flex h-full w-[440px] flex-col border bg-[#fff] shadow-sm dark:bg-[#1B1B1B]`}
             data-testid="copilot-drawer"
             onKeyDown={(event) => event.stopPropagation()}
         >
