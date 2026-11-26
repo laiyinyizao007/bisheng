@@ -506,6 +506,99 @@ NODE_CLASS_MAP = {
 - 重写 `is_condition_node()` 返回 `True`
 - 实现 `route_node(state)` 方法返回目标节点 ID
 
+### 5. 同步节点模板与技能包
+
+节点模板只在后端维护（`bisheng/workflow/common/node_templates.py`），前端侧栏和命令行工具都从 `GET /api/v1/workflow/node_templates` 读取。新增节点类型时：
+
+- 在 `NODE_TEMPLATES` 中加入新节点的模板；
+- 在 `bisheng/dev_toolkit/skills/workflow-as-code/SKILL.md` 中补充该节点的参数说明，否则 Copilot 和 AI 编程助手不会使用它；`src/bisheng-cli/tests/test_skill_workflow_as_code.py` 会检查参数表与模板是否一致；
+- 如果节点有自己的出口（例如按分支连线），在 `FlowNode/foldedBranches.ts` 中补上折叠后的精简行，否则节点折叠后连线无处可接。
+
+## 工作流声明与编辑页 Copilot
+
+v3.1.0-beta1 起，工作流除了在画布上编排，还可以用 YAML **声明**描述，并由编辑页的 **Copilot** 根据自然语言生成或修改。两者共用同一套编译、校验和比对规则。需求口径见 `features/v3.1.0-beta1/` 下的 F005（工作流即代码）、F006（声明技能包）、F007（编辑页 Copilot）、F008（生成质量）。
+
+```mermaid
+flowchart LR
+    subgraph FE[平台前端 · 编辑页]
+        D[Copilot 抽屉] --> S[(会话存储 session.ts)]
+        D -->|应用| C[画布 + 自动布局]
+    end
+    subgraph BE[后端]
+        A[POST /api/v1/workflow/copilot] --> SV[copilot/service.py]
+        SV --> P[prompt.py: 前言 + SKILL.md + 能力边界 + 资源清单 + 画布声明]
+        SV --> M[工作流默认模型]
+        SV --> DSL[bisheng_flow_dsl: 编译 / 校验 / 反编译 / 比对]
+        SV --> MG[merge.py + resources.py]
+    end
+    CLI[bisheng flow 命令族] --> DSL
+    D -->|NDJSON 事件流| A
+```
+
+### 节点模板与工作流声明
+
+- **节点模板归后端**：`bisheng/workflow/common/node_templates.py` 的 `NODE_TEMPLATES` 是唯一来源，经 `GET /api/v1/workflow/node_templates` 下发；前端侧栏与命令行工具都从这里取。
+- **中立包 `src/backend/bisheng_flow_dsl/`**：`compiler`（声明 → 画布）、`validate`（结构校验）、`decompile`（画布 → 声明）、`diff`（两份画布的结构化差异）、`dump`。该包不依赖平台后端，平台与 CLI（经 `bisheng_cli/flow/dsl.py` 转接）共用，规则只改一处。
+- **命令行**：`bisheng flow compile / diff / push / run / export / tool`。写平台走开放接口 `open_endpoints/api/endpoints/workflow_write.py`（scope `workflow:write`）。
+- **技能包**：`bisheng/dev_toolkit/skills/workflow-as-code/SKILL.md` 教 AI 编程助手和 Copilot 怎么写声明；其参数表由 `src/bisheng-cli/tests/test_skill_workflow_as_code.py` 与节点模板、校验器逐键对齐，改节点模板时这个测试会提醒同步。
+
+### Copilot 一轮请求
+
+**接口**（`api/v1/workflow.py`，登录态）：
+
+- `GET /workflow/copilot/availability?flow_id=…`：抽屉打开时调用，依次检查编辑权限和工作流默认模型，不调模型。
+- `POST /workflow/copilot`：请求体是 `flow_id`、发送时的画布、此前的对话和本轮消息；响应是 NDJSON 事件流，事件类型如下。
+
+| 事件 | 含义 |
+| --- | --- |
+| `status` | 阶段与第几次尝试（生成 / 校验 / 重试） |
+| `reasoning` | 模型的推理文本（推理模型才有），前端显示在可折叠的思考框里 |
+| `delta` / `draft` | 回答正文 / 正在流出的 YAML 声明 |
+| `message` | 最终的方案说明 |
+| `ask` | F008：澄清问题（每轮最多 3 题，每题 2–4 个选项，id 由服务端分配 `q1..qN`） |
+| `proposal` | 合并后的完整画布、差异、需要用户选择的资源、被整体替换的节点 |
+| `issues` | 3 次尝试都没通过校验时的问题列表 |
+| `error` | 错误码与可读原因 |
+| `done` | 本轮结束（接口层补发） |
+
+**服务端流程**（`workflow/domain/services/copilot/`）：
+
+1. 校验编辑权限与工作流默认模型；检查长度上限。
+2. `prompt.py` 组装系统消息：F008 的前言（需求检查与回答格式）、`SKILL.md` 原文、运行时生成的能力边界（当前节点类型、代码节点开关、通知类工具）、当前用户可用资源清单（含工具参数名），以及发送时画布反编译出的声明。节点参数中像凭据的值先由 `redact.py` 换成 `<已隐藏>`。
+3. 流式调用模型。回答按代码围栏切分：`yaml` 块是方案，`ask` 块是澄清问题，其余为正文。
+4. 方案经 `bisheng_flow_dsl` 编译、校验，并检查新增或改动的节点都能从开始节点到达；不通过就把问题回喂给模型重试，最多 3 次。
+5. `merge.py` 把方案合并到发送时的画布：未涉及的节点保持 id、参数和位置不变，便签等声明表达不了的内容原样保留。`resources.py` 只在当前用户有权使用的范围内按名称匹配模型、知识库和工具，无法唯一确定的标为「需要你选」。
+6. 平台不保存对话；对话由前端每轮随请求带上。
+
+**上限、超时与错误码**（错误码在 105 段的 10560–10569 子段）：
+
+| 情况 | 处理 |
+| --- | --- |
+| 未配置工作流默认模型 / 模型已删除或停用 | 10560 / 10561，抽屉禁用发送 |
+| 画布超过 500 个节点或 2 000 条连线；画布声明超过 60 000 字；对话超过 40 条或 60 000 字 | 10562，不截断、不基于部分画布出方案 |
+| 首个输出 180 秒内未到；之后连续 60 秒无输出（推理文本也算输出）；整轮超过 600 秒 | 10563 |
+| 回答超过 100 000 字 | 停止读取，以 `issues` 结束 |
+
+### 前端
+
+- **抽屉与会话**（`pages/BuildPage/flow/Copilot/`）：抽屉是画布容器里、画布右侧的一栏（容器为横向 flex），打开时画布变窄。打开状态、各轮对话和进行中的请求都放在 `session.ts` 的 zustand 存储里，按工作流 id 绑定；离开编辑页（`FlowPage` 卸载）或打开另一条工作流时清空，并中止进行中的请求。轮次 id 跨会话单调递增，已结束会话里的请求即使稍后返回，也写不进新会话。
+- **应用**：`panels.ts` 的 `applyCanvas` 先 `takeSnapshot` 再替换画布，因此一次 Ctrl+Z 即可撤销。应用前用 `canvasDigest` 比对发送时与当前的画布，不一致就弹窗确认覆盖。
+- **澄清卡片**：`AskCard.tsx`，作答后锁定。
+- **自动布局**（`autoLayout.ts`）：去掉回环边后按最长路径分层、按重心排序，从左到右排列，锚定原画布左上角；便签不参与。需要等 React Flow 量出节点尺寸，`sizeSettler` 等尺寸变化后再稳定一帧，约 30 帧仍未稳定就按现有尺寸排。拖动、撤销和离开页面都会取消进行中的重排。
+- **折叠**：Copilot 新增的节点以 `data.expand = false` 落到画布，已有节点保持用户的折叠状态。节点折叠或展开时派发 `NODE_FOLD_EVENT`，编辑页据此重排（单独一步撤销，不改视野）。条件节点与输出节点的出口在节点正文里；`FlowNode/foldedBranches.ts` 在折叠时为每个出口渲染一行精简行（相同的出口 id），正文里的出口经 `BodyFolded` 上下文暂不渲染，避免同一 id 出现两次。
+
+### 已知的坑
+
+- **顶栏「保存」会重挂整个编辑面板**：保存后 `Header.tsx` 调 `forceUpdateFlow`（先 `setFlow(null)` 再放回）刷新「有无改动」的比对基准，`Panne` 及其子组件全部卸载重建。放在这些组件里的状态都会在保存时丢失，Copilot 会话因此放在组件外的存储里。
+- **React Flow 不会因为出口增减自动重读出口位置**：只有节点尺寸变化时它才重新测量。折叠切换出口后要调用 `updateNodeInternals(node.id)`。
+- **折叠的正文仍然挂载**：`h-0 overflow-hidden` 只是隐藏，参数校验仍在运行，正文里的组件仍会渲染。
+- **代码节点开关**：Copilot 通过 `bisheng_settings.get_workflow_conf().code_node_enabled` 读取，这个值来自数据库里的系统配置，不是 `config.yaml`。测「代码节点关闭」场景前先确认数据库里的值。
+- **推理模型较慢**：MiniMax-M3 在 Copilot 的提示词上通常先推理 1–3 分钟（实测一次推理文本 3.4 万字）。超时按「首个输出 / 空闲 / 整轮」三段计算，不要改回单一的固定超时。
+
+### 评测
+
+离线评测集在 `src/backend/test/workflow/copilot/eval/`（18 条用例，分四组），调用真实平台与模型，只手动运行、不进 CI；结果与报告见 `features/v3.1.0-beta1/008-copilot-generation-quality/eval-report.md`。改 Copilot 的提示词或回答解析后，应重跑评测并与上一次对比。
+
 ## 相关文档
 
 - 项目总体架构: `docs/architecture/README.md`
@@ -513,6 +606,8 @@ NODE_CLASS_MAP = {
 - Celery Worker 配置: `src/backend/bisheng/worker/`
 - 前端工作流画布: `src/frontend/platform/src/pages/BuildPage/flow/`
 - 工作流 API 接口: `src/backend/bisheng/api/v1/workflow.py`
+- 工作流声明与 Copilot 的需求与设计: `features/v3.1.0-beta1/`（F005、F006、F007、F008）
+- Copilot 产品 PRD 与使用说明: `docs/PRD/3.1-beta1/`、`docs/customer-guides/工作流Copilot发布说明.md`
 
 ## 源码目录结构
 
@@ -520,7 +615,14 @@ NODE_CLASS_MAP = {
 src/backend/bisheng/workflow/
     common/
         node.py             # NodeType 枚举、BaseNodeData、NodeParams 数据模型
+        node_templates.py    # NODE_TEMPLATES 节点模板（前端与 CLI 的唯一来源）
         workflow.py          # WorkflowStatus 枚举
+    domain/services/copilot/
+        service.py           # Copilot 一轮：调模型、切分回答、校验重试、事件流
+        prompt.py            # 系统消息：前言 + SKILL.md + 能力边界 + 资源清单
+        merge.py             # 方案合并到发送时的画布
+        resources.py         # 资源匹配（只在用户有权使用的范围内）
+        redact.py            # 画布凭据遮蔽
     graph/
         graph_engine.py      # GraphEngine 核心引擎
         graph_state.py       # GraphState 变量池
@@ -548,6 +650,8 @@ src/backend/bisheng/workflow/
         base_callback.py     # BaseCallback 抽象接口
         event.py             # 事件数据结构
         llm_callback.py      # LLM 流式回调适配器
+
+src/backend/bisheng_flow_dsl/     # 声明编译 / 校验 / 反编译 / 比对（平台与 CLI 共用）
 
 src/backend/bisheng/worker/workflow/
     tasks.py                 # Celery 任务定义
