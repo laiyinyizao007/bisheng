@@ -22,11 +22,13 @@ import ParameterSubGroup from './ParameterSubGroup';
 import RunLog from './RunLog';
 import { RunTest } from './RunTest';
 import { useUpdateVariableState } from './flowNodeStore';
+import { BodyFolded, foldable, foldedBranches, type FoldedRow } from './foldedBranches';
 
 export const CustomHandle = ({ id = '', node, isLeft = false, className = '' }) => {
     const [openLeft, setOpenLeft] = useState(false);
     const [openRight, setOpenRight] = useState(false);
     const posRef = useRef({ x: 0, y: 0 });
+    const insideFoldedBody = useContext(BodyFolded);
 
     useEffect(() => {
         const handleAddLine = () => {
@@ -52,6 +54,8 @@ export const CustomHandle = ({ id = '', node, isLeft = false, className = '' }) 
         });
         window.dispatchEvent(addNodeEvent);
     };
+
+    if (insideFoldedBody) return null;
 
     if (isLeft) {
         return <div className={cname('absolute top-[58px] -left-[16px]', className)}>
@@ -230,6 +234,8 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
     }
 
     const [expend, setExpend] = useState(node.expand === undefined ? true : node.expand)
+    const folded = !expend && foldable(node.type)
+    const foldedRows = folded ? foldedBranches(node) : []
     // A canvas applied over this node (copilot lands folded) can change the flag under it.
     useEffect(() => { setExpend(node.expand === undefined ? true : node.expand) }, [node.expand])
 
@@ -285,7 +291,7 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
                                 <span className='truncate block min-h-4'>{node.name}</span>
                             </EditText>
                         </div>
-                        {!['output', 'condition', 'end'].includes(node.type) && <div
+                        {foldable(node.type) && <div
                             className='absolute -right-1 -top-1 cursor-pointer p-2'
                             onClick={() => {
                                 // First: the editor snapshots for undo (still unfolded), then re-lays out.
@@ -322,7 +328,8 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
 
                 {/* body */}
                 <div className='-nowheel bg-[#F7F8FB] dark:bg-background pb-5 rounded-b-[20px]'>
-                    <div className={expend || ['output', 'condition', 'end'].includes(node.type) ? `` : 'h-0 overflow-hidden'}>
+                    <BodyFolded.Provider value={folded}>
+                    <div className={folded ? 'h-0 overflow-hidden' : ''}>
                         {node.tab && <NodeTabs
                             data={node}
                             onChange={(val) => {
@@ -364,13 +371,18 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
                             />
                         )}
                     </div>
+                    </BodyFolded.Provider>
+                    {folded && <FoldedRows node={node} rows={foldedRows} />}
                 </div>
                 {/* footer */}
                 {
                     node.type !== 'start' && <CustomHandle isLeft node={node} />
                 }
                 {
-                    !['condition', 'output', 'end'].includes(node.type) && <CustomHandle node={node} />
+                    // the default outgoing handle; condition and output keep theirs in the body
+                    // (or, folded, on the compact rows) unless they have none of their own
+                    (!['condition', 'output', 'end'].includes(node.type) || (folded && node.type === 'output' && !foldedRows.length))
+                    && <CustomHandle node={node} />
                 }
             </div>
 
@@ -380,6 +392,33 @@ function CustomNode({ data: node, selected, isConnectable }: { data: WorkflowNod
 }
 
 export default CustomNode;
+
+// i18n keys of the comparison operators (as the condition editor labels them); symbols as is
+const OPERATOR_LABELS: Record<string, string> = {
+    equals: 'equals', not_equals: 'notEquals', contains: 'contains', not_contains: 'notContains',
+    is_empty: 'isEmpty', is_not_empty: 'isNotEmpty', starts_with: 'startsWith', ends_with: 'endsWith',
+    regex: 'regex', greater_than: '>', less_than: '<', greater_than_or_equal: '≥', less_than_or_equal: '≤',
+}
+
+/** A folded condition / output node: one compact row per outgoing handle, same handle ids. */
+function FoldedRows({ node, rows }: { node: WorkflowNode, rows: FoldedRow[] }) {
+    const { t } = useTranslation('flow')
+    if (!rows.length) return null
+    const op = (value: string) => {
+        const key = OPERATOR_LABELS[value]
+        return key && /^[a-z]/i.test(key) ? String(t(key)) : key || value
+    }
+    return <div className='space-y-1 px-4 pt-1' data-testid='folded-branches'>
+        {rows.map(row => <div key={row.kind === 'else' ? '__else' : row.handleId} className='relative rounded-md bg-background px-2 py-1 text-xs'>
+            <p className='truncate'>
+                {row.kind !== 'option' && <span className='mr-1 font-bold'>{t(row.kind === 'if' ? 'if' : 'else')}</span>}
+                {row.kind === 'if' && row.terms.map(term => [term.left, op(term.op), term.right].filter(Boolean).join(' ')).join(` ${row.operator} `)}
+                {row.kind === 'option' && row.text}
+            </p>
+            <CustomHandle id={row.handleId} node={node} className='top-1/2 -translate-y-1/2 -right-[30px]' />
+        </div>)}
+    </div>
+}
 
 
 const useEventMaster = (node, setNodeError) => {
