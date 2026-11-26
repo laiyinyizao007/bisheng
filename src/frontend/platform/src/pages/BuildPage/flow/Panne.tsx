@@ -19,6 +19,7 @@ import NoteNode from "./NoteNode";
 import Sidebar from "./Sidebar";
 import CopilotDrawer from "./Copilot/CopilotDrawer";
 import { applyCanvas } from "./Copilot/panels";
+import { setCopilotOpen, useCopilotSession } from "./Copilot/session";
 import useFlowStore from "./flowStore";
 
 // 自定义组件
@@ -97,8 +98,9 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
     }, [takeSnapshot]);
 
     const [showApiPage, setShowApiPage] = useState(false)
-    // F007: the copilot drawer's open state lives here, beside the canvas it edits.
-    const [copilotOpen, setCopilotOpen] = useState(false)
+    // F007: the copilot drawer's open state lives in the copilot session, so it survives the
+    // re-mount Save does (see Copilot/session.ts).
+    const copilotOpen = useCopilotSession(state => state.open)
     const applyCopilotCanvas = useCallback((canvas: { nodes: Node[]; edges: Edge[] }) => {
         applyCanvas({ takeSnapshot, setNodes, setEdges }, canvas)
     }, [takeSnapshot, setNodes, setEdges])
@@ -127,7 +129,7 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
                 setNodes(nodes)
             }}
         ></Header>
-        <div className={`flex-1 min-h-0 overflow-hidden ${showApiPage ? 'hidden' : ''} relative`}>
+        <div className={`flex flex-1 min-h-0 overflow-hidden ${showApiPage ? 'hidden' : ''} relative`}>
             <Sidebar onInitStartNode={node => {
                 // start node
                 const nodeId = `${node.type}_${generateUUID(5)}`;
@@ -208,17 +210,18 @@ export default function Panne({ flow, preFlow }: { flow: WorkFlow, preFlow: stri
                     </div>
                 </div>
             </main>
+            {/* inside the canvas area, below the header, so the header buttons stay reachable */}
+            <CopilotDrawer
+                open={copilotOpen && !showApiPage}
+                flowId={flow?.id ? String(flow.id) : ''}
+                getCanvas={getCopilotCanvas}
+                onApply={applyCopilotCanvas}
+                onClose={() => setCopilotOpen(false)}
+            />
         </div>
         <div className={`flex flex-1 min-h-0 overflow-hidden ${showApiPage ? '' : 'hidden'}`}>
             <ApiMainPage type={'flow'} />
         </div>
-        <CopilotDrawer
-            open={copilotOpen && !showApiPage}
-            flowId={flow?.id ? String(flow.id) : ''}
-            getCanvas={getCopilotCanvas}
-            onApply={applyCopilotCanvas}
-            onClose={() => setCopilotOpen(false)}
-        />
     </div>
 };
 
